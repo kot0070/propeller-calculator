@@ -1,0 +1,138 @@
+{
+  "application": "Propeller Calculator Professional UA v3",
+  "version": "3.3.0",
+  "author": "Ivan Soprun",
+  "platform": "Windows 10/11 x64",
+  "distribution": "portable one-file EXE; offline; no administrator rights",
+  "digital_signature": "NotSigned",
+  "database": {
+    "models": 1053,
+    "characteristics": 335434,
+    "sources": 7,
+    "models_with_experiments": 250,
+    "prediction_only_models": 379,
+    "geometries": 24643,
+    "rpm_limit_rows": 887,
+    "performance_duplicate_keys": 0,
+    "model_duplicate_ids": 0
+  },
+  "source_groups": [
+    {
+      "group": "APC Propellers",
+      "models": 870,
+      "models_with_experiment": 75,
+      "prediction_only_models": 379,
+      "characteristics": 300187,
+      "experiment": 0,
+      "prediction": 300187,
+      "cfd_numerical": 0
+    },
+    {
+      "group": "ENOLA Propeller Database 2026",
+      "models": 13,
+      "models_with_experiment": 9,
+      "prediction_only_models": 0,
+      "characteristics": 5025,
+      "experiment": 4668,
+      "prediction": 0,
+      "cfd_numerical": 357
+    },
+    {
+      "group": "Other attached sources",
+      "models": 0,
+      "models_with_experiment": 0,
+      "prediction_only_models": 0,
+      "characteristics": 0,
+      "experiment": null,
+      "prediction": null,
+      "cfd_numerical": null
+    },
+    {
+      "group": "UIUC Propeller Database",
+      "models": 245,
+      "models_with_experiment": 241,
+      "prediction_only_models": 0,
+      "characteristics": 30222,
+      "experiment": 30222,
+      "prediction": 0,
+      "cfd_numerical": 0
+    }
+  ],
+  "unrecognized_files": [
+    {
+      "source": "UIUC_2022",
+      "relative_path": "images/pspbrwse.jbf",
+      "sha256": "045138E4253ACA536BB75BBC818F1EB453002BA6F44828E78B8F26444AC6032A",
+      "file_bytes": 9804,
+      "extension": ".jbf",
+      "skip_reason": "Unknown/unsupported binary metadata format; file retained and SHA-256 logged"
+    }
+  ],
+  "artifacts": [
+    {
+      "file": "All_Source_Files_Audit.csv",
+      "bytes": 1235391,
+      "sha256": "2C7849ED7018F5E79FFC5261752CC7A3FA6E62BABCC021EA1C24DD999FF9392D"
+    },
+    {
+      "file": "Final_Audit.json",
+      "bytes": 13336,
+      "sha256": "37C3E63570B5414DBBFB4B80B4CB794E6FEE84839243757F76B2CBA50D5B1B89"
+    },
+    {
+      "file": "Final_Audit_Summary.md",
+      "bytes": 3612,
+      "sha256": "36D030BFA0E2495092DF7F3A5AAD72B76C85F0A73EEE1D4812A450BB814DC050"
+    },
+    {
+      "file": "Manual_Verification.json",
+      "bytes": 12083,
+      "sha256": "D9337D570DB30F07DA5689896B3A5F159535D331B04ABF4129927E9B0EB5A146"
+    },
+    {
+      "file": "Model_ID_Mapping.csv",
+      "bytes": 382845,
+      "sha256": "26CDFF11FF26E16E50B005A942C8E7A6E78CC4C92B44F1947275C6D26887CBCC"
+    },
+    {
+      "file": "Propeller_Calculator_Professional_UA_v3_3.exe",
+      "bytes": 137636944,
+      "sha256": "E893FFE4E9086483F51C374434A2837E145A700F0D7F795B756C480C750242FE"
+    },
+    {
+      "file": "Propeller_Calculator_v3_Final_Audit.xlsx",
+      "bytes": 611262,
+      "sha256": "75D68782D0C91684877AB40DD3C324F062BF6727E8F942FFCF3093D6087CAD82"
+    },
+    {
+      "file": "Propeller_Calculator_v3_Інструкція_UA.pdf",
+      "bytes": 561664,
+      "sha256": "1A41AB5B05B97B51C482EE442508104983A97A0BE6E2BDEA73855EA7E0E09DD0"
+    },
+    {
+      "file": "README_UA.md",
+      "bytes": 3922,
+      "sha256": "EE64C10BFB02201688069F5DD3F2ABE2B2DAC83B9AD99A7D69AE9D54A01A9EA7"
+    },
+    {
+      "file": "Test_Report_UA.md",
+      "bytes": 7651,
+      "sha256": "690901E8719B11A78AAABD2EE0790EF4D0DD89BAD53608B29A4A76A9BEE5E870"
+    },
+    {
+      "file": "UI_Functional_Test.json",
+      "bytes": 4040,
+      "sha256": "F07820FF84E1425B8E2848A32CC350F15E28AFE95F33FBAA6344E8339945CB87"
+    },
+    {
+      "file": "UI_Preview.png",
+      "bytes": 145151,
+      "sha256": "39C1F18C766CD30E03BC7B78F65EB46656D2EFF63B96C484C812090604DD8509"
+    },
+    {
+      "file": "Unrecognized_Files.csv",
+      "bytes": 248,
+      "sha256": "57B06F8517AC1C16B0DDD4A5B60B2A19A4B21D92F57C3D0E14888E502DF65142"
+    }
+  ]
+}

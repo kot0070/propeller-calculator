@@ -1,0 +1,125 @@
+{
+  "si_imperial_si": {
+    "mass_si_kg": 1.5,
+    "mass_imperial_lb": 3.306933933,
+    "mass_roundtrip_kg": 1.5,
+    "thrust_si_n": 18.256136241988873,
+    "thrust_imperial_mode_n": 18.256136241988873,
+    "thrust_roundtrip_n": 18.256136241988873,
+    "physical_result_invariant": true
+  },
+  "language_switch": {
+    "english": "Calculator",
+    "ukrainian": "Калькулятор",
+    "english_mode": "Engineering mode",
+    "ukrainian_mode": "Інженерний режим",
+    "english_database_header": "Original name",
+    "ukrainian_database_header": "Початкова назва",
+    "english_build_header": "Name",
+    "ukrainian_build_header": "Назва",
+    "passed": true
+  },
+  "tooltips": {
+    "disabled": true,
+    "enabled_for_every_registered_widget": true,
+    "context_help_lengths": [
+      286,
+      286
+    ],
+    "passed": true
+  },
+  "dual_calculators": {
+    "tabs": [
+      "Простий режим",
+      "Інженерний режим"
+    ],
+    "count": 2,
+    "passed": true
+  },
+  "source_vs_math": {
+    "rows": [
+      "Вихідна характеристика бази",
+      "Математичний розрахунок"
+    ],
+    "raw_source": "volume-1/data/apcsp_10x5_static_2651rd.txt:17",
+    "passed": true
+  },
+  "clear_source_mode": {
+    "mode": "Відтворити випробування з бази",
+    "condition": "<div style='width:430px;white-space:normal'>Що: одна конкретна вихідна характеристика пропелера з початкового файла — RPM, J, Ct і Cp.<br>Навіщо: дозволяє точно повторити умови стендового рядка й окремо перевірити тягу та механічну потужність формулами.<br>Де знайти: список безпосередньо сформований із бази; фізичні експерименти показані першими.<br>Не містить: модель мотора, батарею, ESC або масу апарата, якщо автор джерела їх не опублікував.<br>Критичність: дуже висока для перевірки джерела; для власного проєкту виберіть «Власні параметри».</div>",
+    "passed": true
+  },
+  "database_point_mode": {
+    "mode": "database",
+    "reference_point_id": "7363",
+    "rpm": 6395.0,
+    "raw_power": "57.50 W",
+    "math_power": "57.50 W",
+    "total_power_card": "339.7 W",
+    "passed": true
+  },
+  "custom_and_chemistry": {
+    "mode": "custom",
+    "rpm": 10656.0,
+    "type": "Li-ion",
+    "voltage": "14.4",
+    "passed": true
+  },
+  "new_model_resets_source_defaults": {
+    "model": "APC:9X6",
+    "mode": "database",
+    "battery_type": "LiPo",
+    "rpm": 6521.0,
+    "reference_rpm": 6521.0,
+    "passed": true
+  },
+  "load_charts": {
+    "series_points": {
+      "thrust": 10,
+      "current": 10,
+      "power": 10,
+      "rpm": 10,
+      "efficiency_series": 2
+    },
+    "current_limits": 2,
+    "passed": true
+  },
+  "worked_examples": {
+    "source": {
+      "model": "APC:8X9",
+      "mode": "database",
+      "rpm": 6395.0
+    },
+    "custom": {
+      "model": "APC:10X5",
+      "mode": "custom",
+      "rpm": 5920.0,
+      "frame_preset": "450"
+    },
+    "passed": true
+  },
+  "frame_presets": {
+    "default_450_disabled": true,
+    "custom_enabled": true,
+    "value": "650",
+    "diagonal": 0.65,
+    "field_disabled": true,
+    "passed": true
+  },
+  "accessory_inventory": {
+    "enabled": 5,
+    "mass_kg": 0.102000000009,
+    "mass_before": 1.5,
+    "mass_after": 1.602,
+    "mass_after_repeat": 1.602,
+    "passed": true
+  },
+  "saved_build": {
+    "build_id": 1,
+    "components": 10,
+    "comparison_items": 1,
+    "persisted_after_restart": true,
+    "passed": true
+  },
+  "passed": true
+}

@@ -1,0 +1,452 @@
+{
+  "application": {
+    "name": "Propeller Calculator Professional UA v3",
+    "version": "3.0.0",
+    "author": "Ivan Soprun"
+  },
+  "totals": {
+    "models": 1053,
+    "characteristics": 335434,
+    "sources": 7,
+    "models_with_experiments": 250,
+    "prediction_only_models": 379,
+    "geometries": 24643,
+    "rpm_limit_rows": 887,
+    "performance_duplicate_keys": 0,
+    "model_duplicate_ids": 0
+  },
+  "groups": [
+    {
+      "group": "APC Propellers",
+      "models": 870,
+      "models_with_experiment": 75,
+      "prediction_only_models": 379,
+      "characteristics": 300187,
+      "experiment": 0,
+      "prediction": 300187,
+      "cfd_numerical": 0
+    },
+    {
+      "group": "ENOLA Propeller Database 2026",
+      "models": 13,
+      "models_with_experiment": 9,
+      "prediction_only_models": 0,
+      "characteristics": 5025,
+      "experiment": 4668,
+      "prediction": 0,
+      "cfd_numerical": 357
+    },
+    {
+      "group": "Other attached sources",
+      "models": 0,
+      "models_with_experiment": 0,
+      "prediction_only_models": 0,
+      "characteristics": 0,
+      "experiment": null,
+      "prediction": null,
+      "cfd_numerical": null
+    },
+    {
+      "group": "UIUC Propeller Database",
+      "models": 245,
+      "models_with_experiment": 241,
+      "prediction_only_models": 0,
+      "characteristics": 30222,
+      "experiment": 30222,
+      "prediction": 0,
+      "cfd_numerical": 0
+    }
+  ],
+  "sources": [
+    {
+      "code": "APC_CATALOG_202602",
+      "name": "APC Product Data File 2026-02",
+      "group": "APC Propellers",
+      "archive": "PROP-DATA-FILE_202602.xlsx",
+      "sha256": "4C0DD96F7CB04DB95D721A11123FB2ED47956DFA136138A8062D5EE9B4AEB8F2",
+      "archive_bytes": 366609,
+      "version": "2026-02",
+      "source_date": "2026-02",
+      "file_count": 1,
+      "formats": {
+        ".xlsx": 1
+      },
+      "status_counts": {
+        "imported": 1
+      },
+      "recognized_files": 1,
+      "unrecognized_files": 0,
+      "skip_reasons": [
+        {
+          "reason": "21 rows lacked propeller name/diameter/pitch",
+          "files": 1
+        }
+      ],
+      "raw_lines": 865,
+      "raw_data_rows": 864,
+      "parsed_records": 843,
+      "raw_unique_models": 843,
+      "normalized_models": 843,
+      "normalized_alias_merges": 0,
+      "categories": {
+        "catalog": 1
+      },
+      "total": 0,
+      "static_points": null,
+      "dynamic_points": null,
+      "rpm_min": null,
+      "rpm_max": null,
+      "j_min": null,
+      "j_max": null,
+      "experiment_points": null,
+      "prediction_points": null,
+      "cfd_numerical_points": null
+    },
+    {
+      "code": "ENOLA_2026",
+      "name": "ENOLA Propeller Database 2026 (attached Propeller_Database archive)",
+      "group": "ENOLA Propeller Database 2026",
+      "archive": "Propeller_Database.zip",
+      "sha256": "C9E92C5E5BE0AEADAB0D42E2DED5D85822F3E8B8E00029D434A68822E108CA98",
+      "archive_bytes": 223601320,
+      "version": "attached 2026 archive",
+      "source_date": "2026",
+      "file_count": 190,
+      "formats": {
+        ".csv": 170,
+        ".obj": 1,
+        ".stl": 7,
+        ".txt": 10,
+        ".x_b": 1,
+        ".xlsx": 1
+      },
+      "status_counts": {
+        "imported": 64,
+        "imported_reference": 9,
+        "recognized_not_imported": 117
+      },
+      "recognized_files": 190,
+      "unrecognized_files": 0,
+      "skip_reasons": [
+        {
+          "reason": "Acoustic pressure time series is not a propeller performance point",
+          "files": 102
+        },
+        {
+          "reason": "Airfoil polar supports geometry/CFD methods but is not a propeller operating point",
+          "files": 5
+        },
+        {
+          "reason": "Geometry reference indexed by SHA-256; binary mesh not embedded in SQLite",
+          "files": 9
+        },
+        {
+          "reason": "README/provenance text; no tabular performance schema",
+          "files": 10
+        }
+      ],
+      "raw_lines": 13377189,
+      "raw_data_rows": 13376907,
+      "parsed_records": 5074,
+      "raw_unique_models": 15,
+      "normalized_models": 13,
+      "normalized_alias_merges": 2,
+      "categories": {
+        "acoustics": 102,
+        "airfoil_polar": 5,
+        "cad_geometry": 9,
+        "database_metadata": 1,
+        "documentation": 10,
+        "geometry": 2,
+        "performance_cfd": 25,
+        "performance_experiment": 35,
+        "performance_numerical": 1
+      },
+      "total": 5025,
+      "static_points": 576,
+      "dynamic_points": 4449,
+      "rpm_min": 0.0,
+      "rpm_max": 12540.0,
+      "j_min": -0.188091763,
+      "j_max": 2.105512075,
+      "experiment_points": 4668,
+      "prediction_points": 0,
+      "cfd_numerical_points": 357
+    },
+    {
+      "code": "OTHER_CFD_DATASET",
+      "name": "Attached CFD aircraft configuration dataset",
+      "group": "Other attached sources",
+      "archive": "Dataset.zip",
+      "sha256": "0BC48F9B4B8229FEC2C4968D96C5C5FA810AF54CFF5BDE8BD7DA9BDE01F697A1",
+      "archive_bytes": 29511,
+      "version": "attached 2026",
+      "source_date": "2026",
+      "file_count": 3,
+      "formats": {
+        ".csv": 3
+      },
+      "status_counts": {
+        "recognized_not_imported": 3
+      },
+      "recognized_files": 3,
+      "unrecognized_files": 0,
+      "skip_reasons": [
+        {
+          "reason": "Coupled aircraft/rotor CFD rows have no propeller model, diameter or geometry; retained in audit but not mixed with propeller curves",
+          "files": 3
+        }
+      ],
+      "raw_lines": 165,
+      "raw_data_rows": 162,
+      "parsed_records": 0,
+      "raw_unique_models": 0,
+      "normalized_models": 0,
+      "normalized_alias_merges": 0,
+      "categories": {
+        "coupled_airframe_cfd": 3
+      },
+      "total": 0,
+      "static_points": null,
+      "dynamic_points": null,
+      "rpm_min": null,
+      "rpm_max": null,
+      "j_min": null,
+      "j_max": null,
+      "experiment_points": null,
+      "prediction_points": null,
+      "cfd_numerical_points": null
+    },
+    {
+      "code": "UIUC_2022",
+      "name": "UIUC Propeller Database Volumes 1-4",
+      "group": "UIUC Propeller Database",
+      "archive": "UIUC-propDB.zip",
+      "sha256": "089B66DB10391B9A3AD53AAC1B95FA63D24BB7130F0DC1E6A4E7D971C5645995",
+      "archive_bytes": 90906721,
+      "version": "Volumes 1-4 archive",
+      "source_date": "2022-06-27",
+      "file_count": 3652,
+      "formats": {
+        ".css": 1,
+        ".eps": 3,
+        ".fig": 3,
+        ".gif": 11,
+        ".html": 12,
+        ".ico": 1,
+        ".jbf": 1,
+        ".jpg": 164,
+        ".pdf": 10,
+        ".png": 1450,
+        ".txt": 1995,
+        ".zip": 1
+      },
+      "status_counts": {
+        "imported": 1994,
+        "recognized_not_imported": 1657,
+        "unrecognized": 1
+      },
+      "recognized_files": 3651,
+      "unrecognized_files": 1,
+      "skip_reasons": [
+        {
+          "reason": "Nested comparison archive retained; its extracted members duplicate comparison material",
+          "files": 1
+        },
+        {
+          "reason": "UIUC archive README; provenance only",
+          "files": 1
+        },
+        {
+          "reason": "Unknown/unsupported binary metadata format; file retained and SHA-256 logged",
+          "files": 1
+        },
+        {
+          "reason": "Website/paper/presentation asset; no machine-readable propeller operating points",
+          "files": 1655
+        }
+      ],
+      "raw_lines": 46985,
+      "raw_data_rows": 32600,
+      "parsed_records": 32600,
+      "raw_unique_models": 266,
+      "normalized_models": 245,
+      "normalized_alias_merges": 21,
+      "categories": {
+        "documentation": 23,
+        "dynamic_experiment": 1597,
+        "geometry": 133,
+        "nested_archive": 1,
+        "presentation_asset": 1633,
+        "static_experiment": 264,
+        "unknown_binary": 1
+      },
+      "total": 30222,
+      "static_points": 4177,
+      "dynamic_points": 26045,
+      "rpm_min": 940.0,
+      "rpm_max": 27050.0,
+      "j_min": 0.0,
+      "j_max": 1.552,
+      "experiment_points": 30222,
+      "prediction_points": 0,
+      "cfd_numerical_points": 0
+    },
+    {
+      "code": "APC_RPM_REV5",
+      "name": "APC Propeller RPM Limits Rev 5",
+      "group": "APC Propellers",
+      "archive": "APC-Propeller-RPM-Limits-rev5.pdf",
+      "sha256": "67527A6064BAF0128D75CFE50E04F1FFDA7CD04FADB5C001CD8C586A1572ED5B",
+      "archive_bytes": 58283,
+      "version": "Rev 5",
+      "source_date": "2022-03-23",
+      "file_count": 1,
+      "formats": {
+        ".pdf": 1
+      },
+      "status_counts": {
+        "imported": 1
+      },
+      "recognized_files": 1,
+      "unrecognized_files": 0,
+      "skip_reasons": [
+        {
+          "reason": "Seven manufacturer formulas manually verified against rendered one-page PDF; model limits use conservative category matching",
+          "files": 1
+        }
+      ],
+      "raw_lines": 7,
+      "raw_data_rows": 7,
+      "parsed_records": 887,
+      "raw_unique_models": 0,
+      "normalized_models": 0,
+      "normalized_alias_merges": 0,
+      "categories": {
+        "structural_rpm_limits": 1
+      },
+      "total": 0,
+      "static_points": null,
+      "dynamic_points": null,
+      "rpm_min": null,
+      "rpm_max": null,
+      "j_min": null,
+      "j_max": null,
+      "experiment_points": null,
+      "prediction_points": null,
+      "cfd_numerical_points": null
+    },
+    {
+      "code": "APC_PERFILES_202602",
+      "name": "APC PERFILES performance predictions 2026-02",
+      "group": "APC Propellers",
+      "archive": "PERFILES_WEB-202602.zipx",
+      "sha256": "FDEAEE160617B4006C6A96335050091AF4349A1DD33362A1B1B6E74DFA77561F",
+      "archive_bytes": 8275714,
+      "version": "v2025-1001 / simulation 2026-02-24",
+      "source_date": "2026-02-24",
+      "file_count": 460,
+      "formats": {
+        ".dat": 460
+      },
+      "status_counts": {
+        "imported": 454,
+        "recognized_not_imported": 6
+      },
+      "recognized_files": 460,
+      "unrecognized_files": 0,
+      "skip_reasons": [
+        {
+          "reason": "APC numerical prediction RPM validity-range metadata; distinct from structural RPM limits.",
+          "files": 1
+        },
+        {
+          "reason": "APC prediction title/reference metadata; no per-model curve rows.",
+          "files": 1
+        },
+        {
+          "reason": "APC reference/aggregate table; not a per-model performance curve.",
+          "files": 1
+        },
+        {
+          "reason": "Aggregate maximum-efficiency table derived from per-model PER3 files; retained for audit, not duplicated.",
+          "files": 1
+        },
+        {
+          "reason": "Aggregate static prediction table duplicated by J=0 rows in per-model PER3 files.",
+          "files": 2
+        }
+      ],
+      "raw_lines": 417790,
+      "raw_data_rows": 300187,
+      "parsed_records": 300187,
+      "raw_unique_models": 454,
+      "normalized_models": 454,
+      "normalized_alias_merges": 0,
+      "categories": {
+        "performance_prediction": 454,
+        "prediction_summary": 6
+      },
+      "total": 300187,
+      "static_points": 10070,
+      "dynamic_points": 290117,
+      "rpm_min": 100.0,
+      "rpm_max": 45000.0,
+      "j_min": 0.0,
+      "j_max": 2.4664,
+      "experiment_points": 0,
+      "prediction_points": 300187,
+      "cfd_numerical_points": 0
+    },
+    {
+      "code": "APC_PE0_202602",
+      "name": "APC PE0 geometry files 2026-02",
+      "group": "APC Propellers",
+      "archive": "PE0-FILES_WEB-202602.zipx",
+      "sha256": "85A97375DD9FFAEB38022CEF1B5D79AC86C56F2960E9917369AD0E55CE37DF38",
+      "archive_bytes": 1232376,
+      "version": "v2025-1001 / 2026-02-24",
+      "source_date": "2026-02-24",
+      "file_count": 453,
+      "formats": {
+        ".pe0": 453
+      },
+      "status_counts": {
+        "error": 17,
+        "imported": 436
+      },
+      "recognized_files": 453,
+      "unrecognized_files": 0,
+      "skip_reasons": [],
+      "raw_lines": 55400,
+      "raw_data_rows": 22225,
+      "parsed_records": 22225,
+      "raw_unique_models": 453,
+      "normalized_models": 453,
+      "normalized_alias_merges": 0,
+      "categories": {
+        "manufacturer_geometry": 453
+      },
+      "total": 0,
+      "static_points": null,
+      "dynamic_points": null,
+      "rpm_min": null,
+      "rpm_max": null,
+      "j_min": null,
+      "j_max": null,
+      "experiment_points": null,
+      "prediction_points": null,
+      "cfd_numerical_points": null
+    }
+  ],
+  "unrecognized_files": [
+    {
+      "source": "UIUC_2022",
+      "relative_path": "images/pspbrwse.jbf",
+      "sha256": "045138E4253ACA536BB75BBC818F1EB453002BA6F44828E78B8F26444AC6032A",
+      "file_bytes": 9804,
+      "extension": ".jbf",
+      "skip_reason": "Unknown/unsupported binary metadata format; file retained and SHA-256 logged"
+    }
+  ]
+}

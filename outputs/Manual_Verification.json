@@ -1,0 +1,350 @@
+[
+  {
+    "check": "UIUC static",
+    "source": "UIUC_2022",
+    "samples": [
+      {
+        "model_id": "UIUC:AERONAUT:8.5X6",
+        "original_name": "ance_8.5x6",
+        "rpm": 2489.0,
+        "advance_ratio_j": 0.0,
+        "ct": 0.1046,
+        "cp": 0.0567,
+        "thrust_n": 0.47909940887907937,
+        "power_w": 2.3259656563550446,
+        "torque_nm": 0.00892379907603592,
+        "source_row": 2,
+        "raw_row": "2489   0.1046   0.0567",
+        "relative_path": "volume-1/data/ance_8.5x6_static_2848cm.txt",
+        "sha256": "02476739F84870B45748B65A6B0C662E02B749989A6D11BE9A90D9321AF745C9",
+        "evidence_class": "experiment"
+      },
+      {
+        "model_id": "UIUC:AERONAUT:8.5X6",
+        "original_name": "ance_8.5x6",
+        "rpm": 2813.0,
+        "advance_ratio_j": 0.0,
+        "ct": 0.1052,
+        "cp": 0.0556,
+        "thrust_n": 0.6154593324062142,
+        "power_w": 3.2925284576356906,
+        "torque_nm": 0.011177152775758002,
+        "source_row": 3,
+        "raw_row": "2813   0.1052   0.0556",
+        "relative_path": "volume-1/data/ance_8.5x6_static_2848cm.txt",
+        "sha256": "02476739F84870B45748B65A6B0C662E02B749989A6D11BE9A90D9321AF745C9",
+        "evidence_class": "experiment"
+      },
+      {
+        "model_id": "UIUC:AERONAUT:8.5X6",
+        "original_name": "ance_8.5x6",
+        "rpm": 3095.0,
+        "advance_ratio_j": 0.0,
+        "ct": 0.1049,
+        "cp": 0.0549,
+        "thrust_n": 0.742918121921037,
+        "power_w": 4.330119219091937,
+        "torque_nm": 0.013360126873583837,
+        "source_row": 4,
+        "raw_row": "3095   0.1049   0.0549",
+        "relative_path": "volume-1/data/ance_8.5x6_static_2848cm.txt",
+        "sha256": "02476739F84870B45748B65A6B0C662E02B749989A6D11BE9A90D9321AF745C9",
+        "evidence_class": "experiment"
+      }
+    ],
+    "result": "PASS"
+  },
+  {
+    "check": "UIUC dynamic",
+    "source": "UIUC_2022",
+    "samples": [
+      {
+        "model_id": "UIUC:AERONAUT:8.5X6",
+        "original_name": "ance_8.5x6",
+        "rpm": 4000.0,
+        "advance_ratio_j": 0.165,
+        "ct": 0.0993,
+        "cp": 0.0539,
+        "thrust_n": 1.1746632678607547,
+        "power_w": 9.177286468431205,
+        "torque_nm": 0.021909157584317843,
+        "source_row": 2,
+        "raw_row": "0.165   0.0993   0.0539   0.304",
+        "relative_path": "volume-1/data/ance_8.5x6_2849cm_4000.txt",
+        "sha256": "D23C868609949E782A3BDE5E085E40879FCB620AB004A27023DDEDC92E01F310",
+        "evidence_class": "experiment"
+      },
+      {
+        "model_id": "UIUC:AERONAUT:8.5X6",
+        "original_name": "ance_8.5x6",
+        "rpm": 4000.0,
+        "advance_ratio_j": 0.214,
+        "ct": 0.0947,
+        "cp": 0.0543,
+        "thrust_n": 1.1202478496114148,
+        "power_w": 9.245392490460379,
+        "torque_nm": 0.02207174873522187,
+        "source_row": 3,
+        "raw_row": "0.214   0.0947   0.0543   0.374",
+        "relative_path": "volume-1/data/ance_8.5x6_2849cm_4000.txt",
+        "sha256": "D23C868609949E782A3BDE5E085E40879FCB620AB004A27023DDEDC92E01F310",
+        "evidence_class": "experiment"
+      },
+      {
+        "model_id": "UIUC:AERONAUT:8.5X6",
+        "original_name": "ance_8.5x6",
+        "rpm": 4000.0,
+        "advance_ratio_j": 0.255,
+        "ct": 0.0916,
+        "cp": 0.0548,
+        "thrust_n": 1.0835765894868594,
+        "power_w": 9.330525017996848,
+        "torque_nm": 0.02227498767385191,
+        "source_row": 4,
+        "raw_row": "0.255   0.0916   0.0548   0.427",
+        "relative_path": "volume-1/data/ance_8.5x6_2849cm_4000.txt",
+        "sha256": "D23C868609949E782A3BDE5E085E40879FCB620AB004A27023DDEDC92E01F310",
+        "evidence_class": "experiment"
+      }
+    ],
+    "result": "PASS"
+  },
+  {
+    "check": "APC prediction static/dynamic",
+    "source": "APC_PERFILES_202602",
+    "samples": [
+      {
+        "model_id": "APC:10X10M-JK",
+        "original_name": "10x10M-JK",
+        "rpm": 100.0,
+        "advance_ratio_j": 0.0,
+        "ct": 0.196,
+        "cp": 0.1301,
+        "thrust_n": 2.159,
+        "power_w": 0.6,
+        "torque_nm": 0.057,
+        "source_row": 24,
+        "raw_row": "        0.00      0.0000      0.0000      0.1960      0.1301       0.001       0.507       0.485       0.600       0.057       2.159     367.072        4.31      23334.    0.5318  ",
+        "relative_path": "PERFILES_WEB/PERFILES2-MARINE/PER3_10x10M-JK.dat",
+        "sha256": "1ECBEE635D4B619F5AF14331B26DA6145F2251DA874D508A03CDF6E4BCB14C56",
+        "evidence_class": "prediction"
+      },
+      {
+        "model_id": "APC:10X10M-JK",
+        "original_name": "10x10M-JK",
+        "rpm": 100.0,
+        "advance_ratio_j": 0.0404,
+        "ct": 0.1942,
+        "cp": 0.1317,
+        "thrust_n": 2.14,
+        "power_w": 0.607,
+        "torque_nm": 0.058,
+        "source_row": 25,
+        "raw_row": "        0.00      0.0404      0.0596      0.1942      0.1317       0.001       0.513       0.481       0.607       0.058       2.140     359.451        4.31      23371.    0.5185  ",
+        "relative_path": "PERFILES_WEB/PERFILES2-MARINE/PER3_10x10M-JK.dat",
+        "sha256": "1ECBEE635D4B619F5AF14331B26DA6145F2251DA874D508A03CDF6E4BCB14C56",
+        "evidence_class": "prediction"
+      },
+      {
+        "model_id": "APC:10X10M-JK",
+        "original_name": "10x10M-JK",
+        "rpm": 100.0,
+        "advance_ratio_j": 0.0809,
+        "ct": 0.1924,
+        "cp": 0.1334,
+        "thrust_n": 2.12,
+        "power_w": 0.615,
+        "torque_nm": 0.059,
+        "source_row": 26,
+        "raw_row": "        0.08      0.0809      0.1166      0.1924      0.1334       0.001       0.520       0.477       0.615       0.059       2.120     351.573        4.31      23412.    0.5047  ",
+        "relative_path": "PERFILES_WEB/PERFILES2-MARINE/PER3_10x10M-JK.dat",
+        "sha256": "1ECBEE635D4B619F5AF14331B26DA6145F2251DA874D508A03CDF6E4BCB14C56",
+        "evidence_class": "prediction"
+      }
+    ],
+    "result": "PASS"
+  },
+  {
+    "check": "ENOLA experiment",
+    "source": "ENOLA_2026",
+    "samples": [
+      {
+        "model_id": "APC:15X8",
+        "original_name": "APC15x8",
+        "rpm": 870.0,
+        "advance_ratio_j": 0.0,
+        "ct": -0.022068125,
+        "cp": 0.053193833,
+        "thrust_n": -0.11827217,
+        "power_w": 1.5749667753345737,
+        "torque_nm": 0.017287155,
+        "source_row": 2,
+        "raw_row": "870,0,0,-0.11827217,1.522328237,0.017287155,0.026240388,-0.022068125,0.284047637,0.053193833,0.080743583",
+        "relative_path": "BBDD/APC/APC15x8/results/APC15x8_exp.csv",
+        "sha256": "26DAB7886B487B9491040AD63D1FE398127E5D461C5F6FB28A04E7DE21DDA053",
+        "evidence_class": "experiment"
+      },
+      {
+        "model_id": "APC:15X8",
+        "original_name": "APC15x8",
+        "rpm": 2140.0,
+        "advance_ratio_j": 0.0,
+        "ct": 0.051457407,
+        "cp": 0.032139288,
+        "thrust_n": 1.668516697,
+        "power_w": 14.161407162193088,
+        "torque_nm": 0.063192279,
+        "source_row": 3,
+        "raw_row": "2140,0,0,1.668516697,1.704641146,0.063192279,0.021787641,0.051457407,0.052571493,0.032139288,0.011081089",
+        "relative_path": "BBDD/APC/APC15x8/results/APC15x8_exp.csv",
+        "sha256": "26DAB7886B487B9491040AD63D1FE398127E5D461C5F6FB28A04E7DE21DDA053",
+        "evidence_class": "experiment"
+      },
+      {
+        "model_id": "APC:15X8",
+        "original_name": "APC15x8",
+        "rpm": 2140.909091,
+        "advance_ratio_j": 0.0,
+        "ct": 0.098498646,
+        "cp": 0.04428614,
+        "thrust_n": 3.195122788,
+        "power_w": 19.52976743476164,
+        "torque_nm": 0.087110444,
+        "source_row": 4,
+        "raw_row": "2140.909091,0,0,3.195122788,1.680692544,0.087110444,0.021979645,0.098498646,0.051812755,0.04428614,0.01117568",
+        "relative_path": "BBDD/APC/APC15x8/results/APC15x8_exp.csv",
+        "sha256": "26DAB7886B487B9491040AD63D1FE398127E5D461C5F6FB28A04E7DE21DDA053",
+        "evidence_class": "experiment"
+      }
+    ],
+    "result": "PASS"
+  },
+  {
+    "check": "ENOLA CFD",
+    "source": "ENOLA_2026",
+    "samples": [
+      {
+        "model_id": "ENOLA:CUSTOM:CASALINO",
+        "original_name": "Casalino",
+        "rpm": 5000.0,
+        "advance_ratio_j": 0.0,
+        "ct": 0.1288,
+        "cp": 0.0552,
+        "thrust_n": 8.5245,
+        "power_w": 91.31562646434332,
+        "torque_nm": 0.1744,
+        "source_row": 2,
+        "raw_row": "5000.0000,NaN,0.0000,8.5245,0.1744,0.1288,0.0088,0.0552",
+        "relative_path": "BBDD/Custom/Casalino/results/Casalino_StarCCM_urans_0deg.csv",
+        "sha256": "BCC2826DC127D02EBCF8A704FBFBBE8D67C4135C392C47208561DBBE5590539F",
+        "evidence_class": "cfd"
+      },
+      {
+        "model_id": "ENOLA:CUSTOM:CASALINO",
+        "original_name": "Casalino",
+        "rpm": 5000.0,
+        "advance_ratio_j": 0.05,
+        "ct": 0.1275,
+        "cp": 0.056,
+        "thrust_n": 8.4369,
+        "power_w": 92.62462340333906,
+        "torque_nm": 0.1769,
+        "source_row": 3,
+        "raw_row": "5000.0000,NaN,0.0500,8.4369,0.1769,0.1275,0.0089,0.0560",
+        "relative_path": "BBDD/Custom/Casalino/results/Casalino_StarCCM_urans_0deg.csv",
+        "sha256": "BCC2826DC127D02EBCF8A704FBFBBE8D67C4135C392C47208561DBBE5590539F",
+        "evidence_class": "cfd"
+      },
+      {
+        "model_id": "ENOLA:CUSTOM:CASALINO",
+        "original_name": "Casalino",
+        "rpm": 5000.0,
+        "advance_ratio_j": 0.1,
+        "ct": 0.1229,
+        "cp": 0.0564,
+        "thrust_n": 8.1325,
+        "power_w": 93.30530181161686,
+        "torque_nm": 0.1782,
+        "source_row": 4,
+        "raw_row": "5000.0000,NaN,0.1000,8.1325,0.1782,0.1229,0.0090,0.0564",
+        "relative_path": "BBDD/Custom/Casalino/results/Casalino_StarCCM_urans_0deg.csv",
+        "sha256": "BCC2826DC127D02EBCF8A704FBFBBE8D67C4135C392C47208561DBBE5590539F",
+        "evidence_class": "cfd"
+      }
+    ],
+    "result": "PASS"
+  },
+  {
+    "check": "APC catalog",
+    "source": "APC_CATALOG_202602",
+    "samples": [
+      {
+        "model_id": "APC:10.5X4.5",
+        "original_name": "10.5x4.5",
+        "sku": "LP10545",
+        "diameter_m": 0.2667,
+        "pitch_m": 0.1143,
+        "weight_kg": null
+      },
+      {
+        "model_id": "APC:10.5X6",
+        "original_name": "10.5x6",
+        "sku": "LP10560",
+        "diameter_m": 0.2667,
+        "pitch_m": 0.15239999999999998,
+        "weight_kg": null
+      },
+      {
+        "model_id": "APC:10X10",
+        "original_name": "10x10",
+        "sku": "LP10010",
+        "diameter_m": 0.254,
+        "pitch_m": 0.254,
+        "weight_kg": null
+      }
+    ],
+    "result": "PASS"
+  },
+  {
+    "check": "APC RPM PDF Rev 5",
+    "source": "APC_RPM_REV5",
+    "samples": [
+      {
+        "rule_code": "GENERAL",
+        "coefficient_rpm_in": 190000.0,
+        "revision": "Rev 5, 2022-03-23"
+      },
+      {
+        "rule_code": "THIN_DURABLE",
+        "coefficient_rpm_in": 150000.0,
+        "revision": "Rev 5, 2022-03-23"
+      },
+      {
+        "rule_code": "FOLDING",
+        "coefficient_rpm_in": 120000.0,
+        "revision": "Rev 5, 2022-03-23"
+      },
+      {
+        "rule_code": "MULTIROTOR",
+        "coefficient_rpm_in": 105000.0,
+        "revision": "Rev 5, 2022-03-23"
+      },
+      {
+        "rule_code": "SLOW_FLYER",
+        "coefficient_rpm_in": 65000.0,
+        "revision": "Rev 5, 2022-03-23"
+      },
+      {
+        "rule_code": "RACING_GENERAL",
+        "coefficient_rpm_in": 225000.0,
+        "revision": "Rev 5, 2022-03-23"
+      },
+      {
+        "rule_code": "RACING_ELECTRIC",
+        "coefficient_rpm_in": 270000.0,
+        "revision": "Rev 5, 2022-03-23"
+      }
+    ],
+    "result": "PASS"
+  }
+]
