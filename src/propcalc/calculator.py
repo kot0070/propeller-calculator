@@ -247,6 +247,22 @@ class PropellerCalculator:
         if inputs.motor_i0_a is None:
             missing.append("I0 / no-load current")
         warnings = []
+        for _name, _value in (("mass_kg", inputs.mass_kg), ("density_kg_m3", inputs.density_kg_m3),
+                              ("voltage_v", inputs.voltage_v), ("throttle", inputs.throttle),
+                              ("motor_kv", inputs.motor_kv),
+                              ("battery_capacity_ah", inputs.battery_capacity_ah),
+                              ("battery_c_rating", inputs.battery_c_rating),
+                              ("esc_current_a", inputs.esc_current_a)):
+            if not math.isfinite(_value):
+                warnings.append(f"Non-finite input {_name}; result is not meaningful")
+        if inputs.mass_kg <= 0:
+            warnings.append("Non-positive mass_kg; T/W uses a guarded minimum and is not meaningful")
+        if inputs.density_kg_m3 <= 0:
+            warnings.append("Non-positive density_kg_m3; thrust/power scale with density and are not meaningful")
+        if inputs.battery_capacity_ah < 0 or inputs.battery_c_rating < 0:
+            warnings.append("Negative battery capacity/C-rating; runtime and margins are not meaningful")
+        if inputs.motor_count <= 0:
+            warnings.append("Non-positive motor_count treated as 1")
         if missing:
             warnings.append("Simplified-model estimate: missing " + ", ".join(missing))
         if point.extrapolated:

@@ -97,6 +97,20 @@ class CalculatorGuardTests(unittest.TestCase):
         self.assertEqual(result.point.evidence, "experiment")
         self.assertFalse(result.point.extrapolated)
 
+    def test_invalid_inputs_warn_without_crash(self) -> None:
+        negative_mass = self.calculator.calculate(CalculationInputs(
+            model_id="TEST:10X5", motor_kv=500, mass_kg=-5.0))
+        self.assertTrue(any("mass_kg" in w for w in negative_mass.warnings))
+        negative_density = self.calculator.calculate(CalculationInputs(
+            model_id="TEST:10X5", motor_kv=500, density_kg_m3=-1.0))
+        self.assertTrue(any("density" in w for w in negative_density.warnings))
+        non_finite = self.calculator.calculate(CalculationInputs(
+            model_id="TEST:10X5", motor_kv=500, voltage_v=float("nan")))
+        self.assertTrue(any("Non-finite" in w for w in non_finite.warnings))
+        zero_motors = self.calculator.calculate(CalculationInputs(
+            model_id="TEST:10X5", motor_kv=500, motor_count=0))
+        self.assertTrue(any("motor_count" in w for w in zero_motors.warnings))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
