@@ -102,3 +102,105 @@ class QtLanguageRebuildTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+@requires_qt
+@requires_tiny_db
+class QtWarningLocalizationTests(unittest.TestCase):
+    """UA mode must localize every engine warning exemplar (no raw English leaks).
+
+    Uses a tempfile copy of work/build/propellers.seed.db, never the
+    production database.
+    """
+
+    WARNING_EXEMPLARS = [
+        # S3 family: parameterized non-finite inputs (all 12 calculator names).
+        "Non-finite input mass_kg; result is not meaningful",
+        "Non-finite input density_kg_m3; result is not meaningful",
+        "Non-finite input voltage_v; result is not meaningful",
+        "Non-finite input throttle; result is not meaningful",
+        "Non-finite input motor_kv; result is not meaningful",
+        "Non-finite input battery_capacity_ah; result is not meaningful",
+        "Non-finite input battery_c_rating; result is not meaningful",
+        "Non-finite input esc_current_a; result is not meaningful",
+        "Non-finite input speed_m_s; result is not meaningful",
+        "Non-finite input motor_resistance_ohm; result is not meaningful",
+        "Non-finite input motor_max_current_a; result is not meaningful",
+        "Non-finite input motor_max_power_w; result is not meaningful",
+        # S3 family: fixed guard warnings.
+        "Non-positive mass_kg; T/W uses a guarded minimum and is not meaningful",
+        "Non-positive density_kg_m3; thrust/power scale with density and are not meaningful",
+        "Negative battery capacity/C-rating; runtime and margins are not meaningful",
+        "Negative motor_resistance_ohm; result is not meaningful",
+        "Negative motor_max_current_a; margin is not meaningful",
+        "Negative motor_max_power_w; margin is not meaningful",
+        "Non-positive motor_count treated as 1",
+        # Remaining calculator warnings.
+        "Simplified-model estimate: missing Rm / motor winding resistance, I0 / no-load current",
+        "Operating point is outside a measured/predicted table range; nearest-edge extrapolation used",
+        "ESC current limit exceeded",
+        "Battery C-rating current limit exceeded",
+        "Structural RPM limit exceeded",
+        "Battery voltage mismatch: 22.20 V entered, but 6S LiPo is about 22.20 V nominal",
+        "Water mode uses air-derived dimensionless coefficients; cavitation is not modeled and bench validation is mandatory",
+    ]
+
+    def test_ua_warnings_localized_no_english_leak(self) -> None:
+        import re
+
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        from propcalc.qt_app import PropellerMainWindow
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_copy = Path(tmp) / "propellers.seed.db"
+            shutil.copy2(TINY_SEED_DB, db_copy)
+            window = PropellerMainWindow(database_path=str(db_copy))
+            try:
+                app.processEvents()
+                if window.language != "uk":
+                    window._switch_language("uk")
+                    app.processEvents()
+                cyrillic = re.compile(r"[\u0400-\u04FF]")
+                snake = re.compile(r"[A-Za-z]+_[A-Za-z0-9_]+")
+                for exemplar in self.WARNING_EXEMPLARS:
+                    localized = window._localize_warning(exemplar)
+                    self.assertTrue(
+                        cyrillic.search(localized),
+                        f"no Cyrillic in localized warning for {exemplar!r}: {localized!r}",
+                    )
+                    self.assertIsNone(
+                        snake.search(localized),
+                        f"snake_case English leak for {exemplar!r}: {localized!r}",
+                    )
+            finally:
+                window.close()
+                app.processEvents()
+
+    def test_en_warnings_passthrough_intact(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        from propcalc.qt_app import PropellerMainWindow
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_copy = Path(tmp) / "propellers.seed.db"
+            shutil.copy2(TINY_SEED_DB, db_copy)
+            window = PropellerMainWindow(database_path=str(db_copy))
+            try:
+                app.processEvents()
+                start_language = window.language
+                if start_language != "en":
+                    window._switch_language("en")
+                    app.processEvents()
+                for exemplar in self.WARNING_EXEMPLARS:
+                    self.assertEqual(window._localize_warning(exemplar), exemplar)
+                if start_language != "en":
+                    window._switch_language(start_language)
+                    app.processEvents()
+            finally:
+                window.close()
+                app.processEvents()

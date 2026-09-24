@@ -1161,7 +1161,7 @@ class PropellerMainWindow(QMainWindow):
             inputs = self._inputs()
             result = self.calculator.calculate(inputs)
         except Exception as exc:
-            QMessageBox.critical(self, APP_NAME, f"{self.tr('calculation_error')}:\n{exc}")
+            QMessageBox.critical(self, APP_NAME, f"{self.tr('calculation_error')}:\n{self.tr('details')}: {exc}")
             return
         self.current_inputs, self.current_result = inputs, result
         self.selected_model_id = inputs.model_id
@@ -1291,9 +1291,41 @@ class PropellerMainWindow(QMainWindow):
             "Structural RPM limit exceeded": "Перевищено структурний ліміт RPM пропелера.",
             "Water mode uses air-derived dimensionless coefficients; cavitation is not modeled and bench validation is mandatory":
                 "Водний режим використовує безрозмірні коефіцієнти з повітряних даних; кавітація не моделюється, стендова перевірка обов'язкова.",
+            "Non-positive mass_kg; T/W uses a guarded minimum and is not meaningful":
+                "Непозитивна маса; T/W обчислено з мінімальним обмеженням і не має сенсу.",
+            "Non-positive density_kg_m3; thrust/power scale with density and are not meaningful":
+                "Непозитивна густина середовища; тяга і потужність масштабуються з густиною й не мають сенсу.",
+            "Negative battery capacity/C-rating; runtime and margins are not meaningful":
+                "Від'ємна ємність батареї або C-рейтинг; час роботи й запаси не мають сенсу.",
+            "Negative motor_resistance_ohm; result is not meaningful":
+                "Від'ємний опір обмотки мотора; результат не має сенсу.",
+            "Negative motor_max_current_a; margin is not meaningful":
+                "Від'ємний максимальний струм мотора; запас не має сенсу.",
+            "Negative motor_max_power_w; margin is not meaningful":
+                "Від'ємна максимальна потужність мотора; запас не має сенсу.",
+            "Non-positive motor_count treated as 1":
+                "Непозитивна кількість моторів; використано 1.",
         }
         if warning in exact:
             return exact[warning]
+        if warning.startswith("Non-finite input "):
+            name = warning[len("Non-finite input "):].split(";", 1)[0].strip()
+            ua_names = {
+                "mass_kg": "маса",
+                "density_kg_m3": "густина середовища",
+                "voltage_v": "напруга",
+                "throttle": "газ",
+                "motor_kv": "KV мотора",
+                "battery_capacity_ah": "ємність батареї",
+                "battery_c_rating": "C-рейтинг батареї",
+                "esc_current_a": "струм ESC",
+                "speed_m_s": "швидкість потоку",
+                "motor_resistance_ohm": "опір обмотки мотора (Rm)",
+                "motor_max_current_a": "максимальний струм мотора",
+                "motor_max_power_w": "максимальна потужність мотора",
+            }
+            ua_name = ua_names.get(name, name)
+            return f"Некоректне (нескінченне або нечислове) вхідне значення: {ua_name}; результат не має сенсу."
         if warning.startswith("Simplified-model estimate: missing "):
             missing = warning.split("missing ", 1)[1]
             missing = missing.replace("Rm / motor winding resistance", "Rm / опір обмотки мотора")
@@ -1490,7 +1522,7 @@ class PropellerMainWindow(QMainWindow):
             self._snapshot()
             self._build_ui()
         except Exception as exc:
-            QMessageBox.critical(self, APP_NAME, f"{self.tr('import_failed')}:\n{exc}")
+            QMessageBox.critical(self, APP_NAME, f"{self.tr('import_failed')}:\n{self.tr('details')}: {exc}")
 
     def export_db(self) -> None:
         target, _ = QFileDialog.getSaveFileName(self, self.tr("export"), "propellers.db", "SQLite (*.db)")
@@ -1817,7 +1849,7 @@ class PropellerMainWindow(QMainWindow):
             self.current_build_id = self.repository.save_build(self._payload())
             self._refresh_builds()
         except Exception as exc:
-            QMessageBox.critical(self, APP_NAME, str(exc))
+            QMessageBox.critical(self, APP_NAME, f"{self.tr('calculation_error')}:\n{self.tr('details')}: {exc}")
 
     def update_build(self) -> None:
         if self.current_build_id is None:
@@ -1856,7 +1888,7 @@ class PropellerMainWindow(QMainWindow):
             self.current_build_id = self.repository.save_build(payload)
             self._refresh_builds()
         except Exception as exc:
-            QMessageBox.critical(self, APP_NAME, str(exc))
+            QMessageBox.critical(self, APP_NAME, f"{self.tr('import_failed')}:\n{self.tr('details')}: {exc}")
 
     def _result_item(self, label: str, result: CalculationResult, inputs: CalculationInputs) -> dict[str, Any]:
         point = result.point
