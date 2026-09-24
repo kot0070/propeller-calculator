@@ -22,7 +22,7 @@ def sha256(path: Path) -> str:
 
 
 copies = {
-    ROOT / "dist" / "Propeller_Calculator_Professional_UA_v3.exe": "Propeller_Calculator_Professional_UA_v3_3.exe",
+    ROOT / "dist" / "Propeller_Calculator_Professional_UA_v3_3.exe": "Propeller_Calculator_Professional_UA_v3_3.exe",
     DELIVERABLES / "Propeller_Calculator_v3_Інструкція_UA.pdf": "Propeller_Calculator_v3_Інструкція_UA.pdf",
     DELIVERABLES / "README_UA.md": "README_UA.md",
     DELIVERABLES / "Propeller_Calculator_v3_Final_Audit.xlsx": "Propeller_Calculator_v3_Final_Audit.xlsx",
