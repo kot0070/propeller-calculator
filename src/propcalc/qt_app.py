@@ -369,6 +369,11 @@ class PropellerMainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         old_index = self.tabs.currentIndex() if hasattr(self, "tabs") else 0
+        # Dispose the previous UI tree: setCentralWidget() does not delete the
+        # replaced central widget, so without this each rebuild (language/units
+        # switch) left the old tree as hidden-but-alive children of the window
+        # and findChildren() counts (e.g. primary buttons) grew 6->12->18.
+        old_central = self.takeCentralWidget()
         self.edits, self.edit_widgets, self.combos, self.combo_widgets = {}, {}, {}, {}
         self.model_combos, self.tip_widgets, self.tip_keys, self.context_help_labels = [], [], {}, []
         self.reference_point_combos, self.source_preset_labels, self.comparison_explain_labels = [], [], []
@@ -386,7 +391,8 @@ class PropellerMainWindow(QMainWindow):
             self.tabs.addTab(builder(), self.tr(key))
         root_layout.addWidget(self.tabs, 1)
         self.setCentralWidget(root)
-        self.setStatusBar(QStatusBar())
+        if old_central is not None:
+            old_central.deleteLater()
         self.statusBar().showMessage(f"{self.tr('ready_status')} · {AUTHOR} · {self.database_path}")
         self.tabs.setCurrentIndex(min(old_index, self.tabs.count() - 1))
         self._apply_tooltips()
