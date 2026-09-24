@@ -62,10 +62,10 @@ class CalculatorGuardTests(unittest.TestCase):
     def test_sweep_rejects_total_battery_overload(self) -> None:
         # 4 motors sharing one pack: per-motor current fits the ESC, but the
         # pack total must still block the candidate (old min() logic missed it).
+        from propcalc.calculator import G, battery_spec
         inputs = CalculationInputs(
             model_id="TEST:10X5", motor_kv=900, motor_count=4, mass_kg=0.2,
             esc_current_a=60.0, battery_capacity_ah=1.0, battery_c_rating=10.0)
-        _, _, _, _ = self.calculator.sweep(inputs)
         battery_max = inputs.battery_capacity_ah * inputs.battery_c_rating
         point = self.calculator.operating_point(inputs, 1.0, 14.8)
         assert point is not None
@@ -75,8 +75,35 @@ class CalculatorGuardTests(unittest.TestCase):
         self.assertGreater(point.current_a, 0)
         # Sweep must not recommend any point that overloads the pack.
         best, _, _, _ = self.calculator.sweep(inputs)
+        motors = max(1, inputs.motor_count)
         if best is not None:
-            self.assertLessEqual(best.current_a * 4, battery_max)
+            self.assertLessEqual(best.current_a * motors, battery_max)
+        else:
+            # Non-vacuous: sweep returned None, so prove EVERY thrust-sufficient
+            # candidate it could have considered overloads the pack. Fails if
+            # no such candidate exists (neither recommendation nor proof).
+            nominal_v = battery_spec(inputs.battery_type)["nominal_v"]
+            candidate_s = sorted(set(range(max(2, inputs.battery_s - 2),
+                                           min(12, inputs.battery_s + 2) + 1)))
+            examined = 0
+            for cells in candidate_s:
+                voltage = cells * nominal_v
+                for step in range(3, 11):
+                    throttle = step / 10.0
+                    cand = self.calculator.operating_point(inputs, throttle, voltage)
+                    if cand is None or cand.thrust_n <= 0 or cand.current_a <= 0:
+                        continue
+                    if cand.thrust_n * motors < inputs.mass_kg * G * 1.05:
+                        continue
+                    examined += 1
+                    self.assertGreater(
+                        cand.current_a * motors, battery_max,
+                        f"sweep rejected {cells}S@{throttle:.1f} but it fits the pack; "
+                        "None is not proof of battery-overload rejection")
+            self.assertGreater(
+                examined, 0,
+                "sweep returned None but no thrust-sufficient candidate exists; "
+                "test is vacuous (neither recommendation nor proof-of-overload)")
 
     def test_source_point_id_reproduces_exact_row(self) -> None:
         target = self.repository.get_performance_point(2, "TEST:10X5")

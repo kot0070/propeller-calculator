@@ -252,8 +252,14 @@ class PropellerCalculator:
                               ("motor_kv", inputs.motor_kv),
                               ("battery_capacity_ah", inputs.battery_capacity_ah),
                               ("battery_c_rating", inputs.battery_c_rating),
-                              ("esc_current_a", inputs.esc_current_a)):
+                              ("esc_current_a", inputs.esc_current_a),
+                              ("speed_m_s", inputs.speed_m_s)):
             if not math.isfinite(_value):
+                warnings.append(f"Non-finite input {_name}; result is not meaningful")
+        for _name, _value in (("motor_resistance_ohm", inputs.motor_resistance_ohm),
+                              ("motor_max_current_a", inputs.motor_max_current_a),
+                              ("motor_max_power_w", inputs.motor_max_power_w)):
+            if _value is not None and not math.isfinite(_value):
                 warnings.append(f"Non-finite input {_name}; result is not meaningful")
         if inputs.mass_kg <= 0:
             warnings.append("Non-positive mass_kg; T/W uses a guarded minimum and is not meaningful")
@@ -261,6 +267,12 @@ class PropellerCalculator:
             warnings.append("Non-positive density_kg_m3; thrust/power scale with density and are not meaningful")
         if inputs.battery_capacity_ah < 0 or inputs.battery_c_rating < 0:
             warnings.append("Negative battery capacity/C-rating; runtime and margins are not meaningful")
+        if inputs.motor_resistance_ohm is not None and inputs.motor_resistance_ohm < 0:
+            warnings.append("Negative motor_resistance_ohm; result is not meaningful")
+        if inputs.motor_max_current_a is not None and inputs.motor_max_current_a < 0:
+            warnings.append("Negative motor_max_current_a; margin is not meaningful")
+        if inputs.motor_max_power_w is not None and inputs.motor_max_power_w < 0:
+            warnings.append("Negative motor_max_power_w; margin is not meaningful")
         if inputs.motor_count <= 0:
             warnings.append("Non-positive motor_count treated as 1")
         if missing:
