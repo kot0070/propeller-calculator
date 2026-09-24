@@ -94,18 +94,15 @@ class PropellerCalculator:
     def __init__(self, repository: Repository):
         self.repository = repository
 
-    def _point_at_rpm(self, inputs: CalculationInputs, rpm: float, voltage_effective: float) -> OperatingPoint | None:
+    def _build_point(self, inputs: CalculationInputs, rpm: float, ct: float, cp: float,
+                       evidence_class: str, source_type: str, extrapolated: bool,
+                       voltage_effective: float) -> OperatingPoint | None:
         model = self.repository.get_model(inputs.model_id)
         if model is None or not model["diameter_m"] or rpm <= 0:
             return None
         diameter = float(model["diameter_m"])
         n = rpm / 60.0
         j = inputs.speed_m_s / (n * diameter) if n > 0 else 0.0
-        sample = self.repository.coefficients(inputs.model_id, rpm, j)
-        if sample is None:
-            return None
-        ct = sample.ct
-        cp = sample.cp
         thrust = ct * inputs.density_kg_m3 * n**2 * diameter**4
         prop_power = cp * inputs.density_kg_m3 * n**3 * diameter**5
         torque = prop_power / (2.0 * math.pi * n) if n > 0 else 0.0
@@ -116,17 +113,47 @@ class PropellerCalculator:
         else:
             current = prop_power / max(voltage_effective * 0.82, 0.1) + i0
         electrical = max(0.0, voltage_effective * current)
-        shaft_input = max(0.0, electrical - current**2 * (inputs.motor_resistance_ohm or 0.0) - voltage_effective * i0)
         motor_eff = min(0.98, max(0.0, prop_power / electrical)) if electrical > 0 else 0.0
         if abs(j) < 1e-9:
             aero = max(0.0, min(1.0, (max(ct, 0.0) ** 1.5) / (math.sqrt(2.0) * cp))) if cp > 0 else 0.0
         else:
             aero = max(0.0, min(1.0, ct * j / cp)) if cp > 0 else 0.0
         system = max(0.0, min(1.0, aero * motor_eff * 0.97))
-        base_confidence = {"experiment": 0.94, "prediction": 0.72, "cfd": 0.66, "numerical": 0.60}.get(sample.evidence_class, 0.45)
-        confidence = max(0.15, base_confidence - (0.25 if sample.extrapolated else 0.0))
+        base_confidence = {"experiment": 0.94, "prediction": 0.72, "cfd": 0.66, "numerical": 0.60}.get(evidence_class, 0.45)
+        confidence = max(0.15, base_confidence - (0.25 if extrapolated else 0.0))
         return OperatingPoint(rpm, j, ct, cp, thrust, torque, prop_power, electrical, current, aero, system,
-                              motor_eff, confidence, sample.evidence_class, sample.source_type, sample.extrapolated)
+                              motor_eff, confidence, evidence_class, source_type, extrapolated)
+
+    def _point_from_source_row(self, inputs: CalculationInputs, row: Any,
+                               voltage_effective: float) -> OperatingPoint | None:
+        """Build an operating point directly from a stored performance row.
+
+        Used when the caller explicitly selects a database point via
+        ``source_point_id``. Unlike interpolation, the stored Ct/Cp/RPM are
+        reproduced exactly.
+        """
+        try:
+            rpm = float(row["rpm"])
+            ct = float(row["ct"])
+            cp = float(row["cp"])
+        except (TypeError, ValueError, KeyError):
+            return None
+        evidence_class = str(row["evidence_class"]) if row["evidence_class"] else "none"
+        source_type = str(row["source_type"]) if row["source_type"] else ""
+        return self._build_point(inputs, rpm, ct, cp, evidence_class, source_type, False, voltage_effective)
+
+    def _point_at_rpm(self, inputs: CalculationInputs, rpm: float, voltage_effective: float) -> OperatingPoint | None:
+        model = self.repository.get_model(inputs.model_id)
+        if model is None or not model["diameter_m"] or rpm <= 0:
+            return None
+        diameter = float(model["diameter_m"])
+        n = rpm / 60.0
+        j = inputs.speed_m_s / (n * diameter) if n > 0 else 0.0
+        sample = self.repository.coefficients(inputs.model_id, rpm, j)
+        if sample is None:
+            return None
+        return self._build_point(inputs, rpm, sample.ct, sample.cp, sample.evidence_class,
+                                 sample.source_type, sample.extrapolated, voltage_effective)
 
     def operating_point(self, inputs: CalculationInputs, throttle: float | None = None,
                         voltage: float | None = None) -> OperatingPoint | None:
@@ -135,6 +162,12 @@ class PropellerCalculator:
         voltage = inputs.voltage_v if voltage is None else voltage
         effective = max(0.0, voltage * throttle)
         if direct_source_point:
+            if inputs.source_point_id is not None:
+                row = self.repository.get_performance_point(inputs.source_point_id, inputs.model_id)
+                if row is not None:
+                    direct = self._point_from_source_row(inputs, row, effective)
+                    if direct is not None:
+                        return direct
             return self._point_at_rpm(inputs, max(0.0, float(inputs.rpm_override)), effective)
         no_load_rpm = max(0.0, inputs.motor_kv * effective)
         if no_load_rpm <= 0:
@@ -174,7 +207,11 @@ class PropellerCalculator:
                     continue
                 if point.thrust_n * max(1, inputs.motor_count) < inputs.mass_kg * G * 1.05:
                     continue
-                if point.current_a > min(inputs.esc_current_a, inputs.battery_capacity_ah * inputs.battery_c_rating):
+                motors = max(1, inputs.motor_count)
+                battery_max_a = inputs.battery_capacity_ah * inputs.battery_c_rating
+                if inputs.esc_current_a > 0 and point.current_a > inputs.esc_current_a:
+                    continue
+                if battery_max_a > 0 and point.current_a * motors > battery_max_a:
                     continue
                 rpm_limit = self.repository.structural_rpm(inputs.model_id)
                 if rpm_limit and rpm_limit["max_rpm"] and point.rpm > rpm_limit["max_rpm"]:
@@ -194,8 +231,10 @@ class PropellerCalculator:
         chemistry = battery_spec(inputs.battery_type)
         runtime = inputs.battery_capacity_ah * chemistry["usable_fraction"] / max(total_current, 1e-6) * 60.0
         esc_margin = (inputs.esc_current_a - point.current_a) / max(inputs.esc_current_a, 1e-6) * 100.0
-        motor_current_margin = None if inputs.motor_max_current_a is None else (inputs.motor_max_current_a - point.current_a) / inputs.motor_max_current_a * 100.0
-        motor_power_margin = None if inputs.motor_max_power_w is None else (inputs.motor_max_power_w - point.prop_power_w) / inputs.motor_max_power_w * 100.0
+        motor_current_margin = (None if inputs.motor_max_current_a is None or inputs.motor_max_current_a <= 0
+                                      else (inputs.motor_max_current_a - point.current_a) / inputs.motor_max_current_a * 100.0)
+        motor_power_margin = (None if inputs.motor_max_power_w is None or inputs.motor_max_power_w <= 0
+                                    else (inputs.motor_max_power_w - point.prop_power_w) / inputs.motor_max_power_w * 100.0)
         battery_max = inputs.battery_capacity_ah * inputs.battery_c_rating
         battery_margin = (battery_max - total_current) / max(battery_max, 1e-6) * 100.0
         rpm_row = self.repository.structural_rpm(inputs.model_id)
