@@ -155,6 +155,29 @@ class CalculatorGuardTests(unittest.TestCase):
         self.assertTrue(math.isnan(result.runtime_min))
         self.assertTrue(any("No valid operating point" in w for w in result.warnings))
 
+    def test_motor_overcurrent_warns(self) -> None:
+        result = self.calculator.calculate(CalculationInputs(
+            model_id="TEST:10X5", motor_kv=500, motor_count=1,
+            motor_max_current_a=1.0))
+        assert result.motor_current_margin_percent is not None
+        self.assertLess(result.motor_current_margin_percent, 0)
+        self.assertTrue(any("Motor current limit exceeded" in w for w in result.warnings))
+
+    def test_motor_overpower_warns(self) -> None:
+        result = self.calculator.calculate(CalculationInputs(
+            model_id="TEST:10X5", motor_kv=500, motor_count=1,
+            motor_max_power_w=10.0))
+        assert result.motor_power_margin_percent is not None
+        self.assertLess(result.motor_power_margin_percent, 0)
+        self.assertTrue(any("Motor power limit exceeded" in w for w in result.warnings))
+
+    def test_motor_limits_ok_no_warning(self) -> None:
+        result = self.calculator.calculate(CalculationInputs(
+            model_id="TEST:10X5", motor_kv=500, motor_count=1,
+            motor_max_current_a=100.0, motor_max_power_w=1000.0))
+        self.assertFalse(any("Motor current limit exceeded" in w for w in result.warnings))
+        self.assertFalse(any("Motor power limit exceeded" in w for w in result.warnings))
+
     def test_valid_fixture_runtime_number_unchanged(self) -> None:
         inputs = CalculationInputs(model_id="TEST:10X5", motor_kv=500, motor_count=1)
         result = self.calculator.calculate(inputs)

@@ -287,6 +287,10 @@ class PropellerCalculator:
             warnings.append("Operating point is outside a measured/predicted table range; nearest-edge extrapolation used")
         if esc_margin < 0:
             warnings.append("ESC current limit exceeded")
+        if motor_current_margin is not None and motor_current_margin < 0:
+            warnings.append("Motor current limit exceeded")
+        if motor_power_margin is not None and motor_power_margin < 0:
+            warnings.append("Motor power limit exceeded")
         if battery_margin < 0:
             warnings.append("Battery C-rating current limit exceeded")
         if structural_margin is not None and structural_margin < 0:

@@ -1486,6 +1486,8 @@ class PropellerMainWindow(QMainWindow):
             "Operating point is outside a measured/predicted table range; nearest-edge extrapolation used":
                 "Робоча точка поза діапазоном таблиці; використано найближчий край з ознакою екстраполяції.",
             "ESC current limit exceeded": "Перевищено допустимий струм ESC.",
+            "Motor current limit exceeded": "Перевищено допустимий струм мотора.",
+            "Motor power limit exceeded": "Перевищено допустиму потужність мотора.",
             "Battery C-rating current limit exceeded": "Перевищено струмовий ліміт батареї за C-рейтингом.",
             "Structural RPM limit exceeded": "Перевищено структурний ліміт RPM пропелера.",
             "Water mode uses air-derived dimensionless coefficients; cavitation is not modeled and bench validation is mandatory":
