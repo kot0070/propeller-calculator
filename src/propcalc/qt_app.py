@@ -257,6 +257,19 @@ QToolTip {background:#E7F2F2;color:#102126;border:1px solid #3A7775;padding:10px
 """
 
 
+class CalcInputErrors(ValueError):
+    """Parse failures for calculator numeric fields.
+
+    Carries ``field_errors`` as a list of ``(field_key, raw_value)`` tuples
+    in parse order. Raised by ``_inputs``; handled inline by ``calculate``
+    (no modal), while all other exceptions keep the critical modal.
+    """
+
+    def __init__(self, field_errors: list[tuple[str, str]]) -> None:
+        super().__init__("; ".join(f"{key}={raw!r}" for key, raw in field_errors))
+        self.field_errors = field_errors
+
+
 class PropellerMark(QWidget):
     """Small vector propeller/motor mark; scales cleanly at 100–200% DPI."""
 
@@ -848,6 +861,15 @@ class PropellerMainWindow(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(8, 6, 8, 8)
+        self.calc_error_label = QLabel()
+        self.calc_error_label.setObjectName("calcInputError")
+        self.calc_error_label.setWordWrap(True)
+        self.calc_error_label.setVisible(False)
+        self.calc_error_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.calc_error_label.setStyleSheet("color:#FF7F71;font-weight:700;")
+        self.calc_error_label.setAccessibleName("calcInputError")
+        layout.addWidget(self.calc_error_label)
+        self._calc_error_originals = {}
         self.calculator_modes = QTabWidget()
         self.calculator_modes.setObjectName("calculatorModes")
         self.calculator_modes.addTab(self._simple_calculator_page(), self.tr("simple_mode"))
@@ -1136,30 +1158,143 @@ class PropellerMainWindow(QMainWindow):
 
     def _inputs(self) -> CalculationInputs:
         self._snapshot()
+        errors: list[tuple[str, str]] = []
+
+        def parse_float(key: str) -> float | None:
+            raw = str(self.state.get(key, ""))
+            try:
+                return float(raw)
+            except (ValueError, TypeError):
+                errors.append((key, raw))
+                return None
+
+        def parse_optional(key: str) -> float | None:
+            raw = str(self.state.get(key, ""))
+            if not raw.strip():
+                return None
+            try:
+                return float(raw)
+            except (ValueError, TypeError):
+                errors.append((key, raw))
+                return None
+
+        def parse_int(key: str) -> int | None:
+            raw = str(self.state.get(key, ""))
+            try:
+                return int(float(raw))
+            except (ValueError, TypeError):
+                errors.append((key, raw))
+                return None
+
+        voltage = parse_float("voltage")
+        throttle = parse_float("throttle")
+        kv = parse_float("kv")
+        esc = parse_float("esc")
+        capacity = parse_float("capacity")
+        c_rating = parse_float("c_rating")
+        density = parse_float("density")
+        speed_raw = parse_float("speed")
+        mass_raw = parse_float("mass")
+        motors = parse_int("motors")
+        battery_s = parse_int("battery_s")
+        rm = parse_optional("rm")
+        i0 = parse_optional("i0")
+        motor_max_current = parse_optional("motor_max_current")
+        motor_max_power = parse_optional("motor_max_power")
+        rpm_override: float | None = None
+        source_point_id: int | None = None
+        if self.state.get("configuration_mode") == "database":
+            ref_rpm_raw = str(self.state.get("reference_rpm", ""))
+            if ref_rpm_raw.strip():
+                try:
+                    rpm_override = float(ref_rpm_raw)
+                except (ValueError, TypeError):
+                    errors.append(("reference_rpm", ref_rpm_raw))
+            ref_pid_raw = str(self.state.get("reference_point_id", ""))
+            if ref_pid_raw.strip():
+                try:
+                    source_point_id = int(ref_pid_raw)
+                except (ValueError, TypeError):
+                    errors.append(("reference_point_id", ref_pid_raw))
+        if errors:
+            raise CalcInputErrors(errors)
+        assert voltage is not None and throttle is not None and kv is not None
+        assert esc is not None and capacity is not None and c_rating is not None
+        assert density is not None and speed_raw is not None and mass_raw is not None
+        assert motors is not None and battery_s is not None
         return CalculationInputs(
             model_id=str(self.selected_model_id or self.model_combo.currentData() or self.model_combo.currentText().strip()),
-            voltage_v=float(self.state["voltage"]), throttle=float(self.state["throttle"]) / 100,
-            motor_kv=float(self.state["kv"]), motor_resistance_ohm=self._optional(self.state["rm"]),
-            motor_i0_a=self._optional(self.state["i0"]),
-            motor_max_current_a=self._optional(self.state["motor_max_current"]),
-            motor_max_power_w=self._optional(self.state["motor_max_power"]),
-            esc_current_a=float(self.state["esc"]), battery_capacity_ah=float(self.state["capacity"]),
-            battery_c_rating=float(self.state["c_rating"]), battery_s=int(float(self.state["battery_s"])),
+            voltage_v=voltage, throttle=throttle / 100,
+            motor_kv=kv, motor_resistance_ohm=rm,
+            motor_i0_a=i0,
+            motor_max_current_a=motor_max_current,
+            motor_max_power_w=motor_max_power,
+            esc_current_a=esc, battery_capacity_ah=capacity,
+            battery_c_rating=c_rating, battery_s=battery_s,
             battery_type=self.state.get("battery_type", "LiPo"),
-            speed_m_s=float(to_si(float(self.state["speed"]), "speed", self.unit_system)),
-            mass_kg=float(to_si(float(self.state["mass"]), "mass_kg", self.unit_system)),
-            motor_count=int(float(self.state["motors"])), density_kg_m3=float(self.state["density"]),
+            speed_m_s=float(to_si(speed_raw, "speed", self.unit_system)),
+            mass_kg=float(to_si(mass_raw, "mass_kg", self.unit_system)),
+            motor_count=motors, density_kg_m3=density,
             medium=self.state["medium"],
-            rpm_override=(float(self.state["reference_rpm"])
-                          if self.state.get("configuration_mode") == "database" and self.state.get("reference_rpm")
-                          else None),
-            source_point_id=(int(self.state["reference_point_id"])
-                             if self.state.get("configuration_mode") == "database" and self.state.get("reference_point_id")
-                             else None))
+            rpm_override=rpm_override,
+            source_point_id=source_point_id)
+
+    def _clear_calc_input_error(self) -> None:
+        originals = getattr(self, "_calc_error_originals", {})
+        for widget_id, (widget_ref, original) in list(originals.items()):
+            try:
+                widget_ref.setStyleSheet(original)
+            except RuntimeError:
+                pass
+        self._calc_error_originals = {}
+        label = getattr(self, "calc_error_label", None)
+        if label is not None:
+            label.clear()
+            label.setVisible(False)
+
+    def _show_calc_input_error(self, field_errors: list[tuple[str, str]]) -> None:
+        self._clear_calc_input_error()
+        parts = []
+        for key, raw in field_errors:
+            label = self.tr(key)
+            parts.append(f"{label} ({key}): {raw!r}")
+        message = f"{self.tr('calculation_error')}: " + "; ".join(parts)
+        label_widget = getattr(self, "calc_error_label", None)
+        if label_widget is not None:
+            label_widget.setText(message)
+            label_widget.setVisible(True)
+        first_key = field_errors[0][0]
+        widgets: list = []
+        widgets.extend(self.edit_widgets.get(first_key, []))
+        widgets.extend(self.combo_widgets.get(first_key, []))
+        canonical = self.edits.get(first_key) or self.combos.get(first_key)
+        if canonical is None and first_key == "reference_point_id":
+            combos = getattr(self, "reference_point_combos", [])
+            canonical = combos[0] if combos else None
+        if canonical is not None and canonical not in widgets:
+            widgets.append(canonical)
+        for widget in widgets:
+            try:
+                if id(widget) not in self._calc_error_originals:
+                    self._calc_error_originals[id(widget)] = (widget, widget.styleSheet())
+                original = self._calc_error_originals[id(widget)][1]
+                widget.setStyleSheet(original + "\nQLineEdit{border:1px solid #E5484D;}\nQComboBox{border:1px solid #E5484D;}")
+            except RuntimeError:
+                pass
+        if canonical is not None:
+            try:
+                canonical.setFocus(Qt.FocusReason.OtherFocusReason)
+            except RuntimeError:
+                pass
 
     def calculate(self) -> None:
+        self._clear_calc_input_error()
         try:
             inputs = self._inputs()
+        except CalcInputErrors as exc:
+            self._show_calc_input_error(exc.field_errors)
+            return
+        try:
             result = self.calculator.calculate(inputs)
         except Exception as exc:
             QMessageBox.critical(self, APP_NAME, f"{self.tr('calculation_error')}:\n{self.tr('details')}: {exc}")
@@ -1866,7 +2001,15 @@ class PropellerMainWindow(QMainWindow):
             self.save_build_new()
             return
         self._sync_build_text()
-        self.repository.save_build(self._payload(), self.current_build_id)
+        try:
+            payload = self._payload()
+        except CalcInputErrors as exc:
+            self._show_calc_input_error(exc.field_errors)
+            return
+        except Exception as exc:
+            QMessageBox.critical(self, APP_NAME, f"{self.tr('calculation_error')}:\n{self.tr('details')}: {exc}")
+            return
+        self.repository.save_build(payload, self.current_build_id)
         self._refresh_builds()
 
     def delete_build(self) -> None:
@@ -1887,7 +2030,15 @@ class PropellerMainWindow(QMainWindow):
         self._sync_build_text()
         target, _ = QFileDialog.getSaveFileName(self, self.tr("export_json"), "build.json", "JSON (*.json)")
         if target:
-            Path(target).write_text(json.dumps(self._payload(), ensure_ascii=False, indent=2), encoding="utf-8")
+            try:
+                payload = self._payload()
+            except CalcInputErrors as exc:
+                self._show_calc_input_error(exc.field_errors)
+                return
+            except Exception as exc:
+                QMessageBox.critical(self, APP_NAME, f"{self.tr('calculation_error')}:\n{self.tr('details')}: {exc}")
+                return
+            Path(target).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def import_build(self) -> None:
         source, _ = QFileDialog.getOpenFileName(self, self.tr("import_json"), "", "JSON (*.json)")

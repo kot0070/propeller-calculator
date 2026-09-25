@@ -323,3 +323,162 @@ class QtAccessibilityNamingTests(unittest.TestCase):
             finally:
                 window.close()
                 app.processEvents()
+
+
+@requires_qt
+@requires_tiny_db
+class QtCalcInputErrorTests(unittest.TestCase):
+    """Invalid calculator text must show an inline error, not a modal.
+
+    Regression: plain QLineEdits with float() in _inputs raised into a modal
+    critical only (no focus move, no highlight, stale result stays). The fix
+    collects per-field parse failures and shows them inline in a persistent
+    error label, highlights the first bad field and moves focus to it, with
+    no exception escaping calculate() and no invalid result stored.
+
+    Uses a tempfile copy of work/build/propellers.seed.db, never the
+    production database.
+    """
+
+    def _make_window(self, app, tmp: str):
+        from propcalc.qt_app import PropellerMainWindow
+
+        db_copy = Path(tmp) / "propellers.seed.db"
+        shutil.copy2(TINY_SEED_DB, db_copy)
+        window = PropellerMainWindow(database_path=str(db_copy))
+        window.show()
+        app.processEvents()
+        app.processEvents()
+        return window
+
+    def test_invalid_voltage_inline_error_both_modes(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        from propcalc.qt_app import PropellerMainWindow  # noqa: F401
+
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                # Sanity: both calculator modes share the single calculate slot.
+                self.assertEqual(window.calculator_modes.count(), 2)
+                for mode_index in (0, 1):
+                    with self.subTest(mode=mode_index):
+                        window.calculator_modes.setCurrentIndex(mode_index)
+                        app.processEvents()
+                        # Valid control first: calculates with no inline error.
+                        window.edits["voltage"].setText("14.8")
+                        app.processEvents()
+                        window.calculate()
+                        app.processEvents()
+                        self.assertTrue(window.calc_error_label.isHidden())
+                        self.assertIsNotNone(window.current_result)
+                        prior_result = window.current_result
+                        # Invalid: real calculate slot must not raise (no modal).
+                        window.edits["voltage"].setText("abc")
+                        app.processEvents()
+                        try:
+                            window.calculate()
+                        except Exception as exc:  # noqa: BLE001
+                            self.fail(f"calculate() raised on invalid input: {exc!r}")
+                        app.processEvents()
+                        label = window.calc_error_label
+                        self.assertFalse(label.isHidden(), "error label must be shown")
+                        self.assertTrue(label.text(), "error label text empty")
+                        self.assertIn("voltage", label.text().lower())
+                        bad = window.edits["voltage"]
+                        self.assertIn("E5484D", bad.styleSheet())
+                        self.assertIs(window.focusWidget(), bad)
+                        # No invalid result stored; prior valid result retained.
+                        self.assertIs(window.current_result, prior_result)
+                        # Valid control again: error clears and calculation resumes.
+                        window.edits["voltage"].setText("14.8")
+                        app.processEvents()
+                        window.calculate()
+                        app.processEvents()
+                        self.assertTrue(window.calc_error_label.isHidden())
+                        self.assertEqual(window.edits["voltage"].styleSheet(), "")
+            finally:
+                window.close()
+                app.processEvents()
+
+    def test_invalid_input_update_build_no_raise_user_informed(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from unittest import mock
+
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        import propcalc.qt_app as qt_app
+
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                with (
+                    mock.patch.object(qt_app.QMessageBox, "critical") as critical,
+                    mock.patch.object(window.repository, "save_build") as save,
+                ):
+                    # Bypass save (tiny seed DB rejects the FK) and force the
+                    # update path: any non-None id reaches _payload().
+                    window.current_build_id = 1
+                    window.edits["voltage"].setText("abc")
+                    app.processEvents()
+                    try:
+                        window.update_build()
+                    except Exception as exc:  # noqa: BLE001
+                        self.fail(f"update_build() raised on invalid input: {exc!r}")
+                    app.processEvents()
+                    save.assert_not_called()
+                    informed_inline = (
+                        not window.calc_error_label.isHidden()
+                        and bool(window.calc_error_label.text())
+                    )
+                    self.assertTrue(
+                        informed_inline or critical.called,
+                        "user must be informed via inline label or modal",
+                    )
+            finally:
+                window.close()
+                app.processEvents()
+
+    def test_invalid_input_export_build_no_raise_no_file(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from unittest import mock
+
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        import propcalc.qt_app as qt_app
+
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                target = Path(tmp) / "build.json"
+                window.edits["voltage"].setText("abc")
+                app.processEvents()
+                with (
+                    mock.patch.object(
+                        qt_app.QFileDialog,
+                        "getSaveFileName",
+                        return_value=(str(target), "JSON (*.json)"),
+                    ),
+                    mock.patch.object(qt_app.QMessageBox, "critical") as critical,
+                ):
+                    try:
+                        window.export_build()
+                    except Exception as exc:  # noqa: BLE001
+                        self.fail(f"export_build() raised on invalid input: {exc!r}")
+                    app.processEvents()
+                    self.assertFalse(target.exists(), "no file must be written")
+                    informed_inline = (
+                        not window.calc_error_label.isHidden()
+                        and bool(window.calc_error_label.text())
+                    )
+                    self.assertTrue(
+                        informed_inline or critical.called,
+                        "user must be informed via inline label or modal",
+                    )
+            finally:
+                window.close()
+                app.processEvents()
