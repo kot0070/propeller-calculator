@@ -1,6 +1,7 @@
 """Regression guards for calculator batch 1 (fixture DB, no production data needed)."""
 from __future__ import annotations
 
+import math
 import sqlite3
 import tempfile
 import unittest
@@ -137,6 +138,29 @@ class CalculatorGuardTests(unittest.TestCase):
         zero_motors = self.calculator.calculate(CalculationInputs(
             model_id="TEST:10X5", motor_kv=500, motor_count=0))
         self.assertTrue(any("motor_count" in w for w in zero_motors.warnings))
+
+    def test_no_operating_point_runtime_is_nan_with_warning(self) -> None:
+        # Unknown model -> operating_point() is None -> zero-substitute point
+        # with zero current. Runtime must be a NaN sentinel (never the
+        # 240000000.0 min blow-up from dividing by the 1e-6 guard), plus an
+        # explicit warning so the UI card can render "—" instead of a number.
+        result = self.calculator.calculate(CalculationInputs(
+            model_id="NOPE:missing", motor_kv=500, motor_count=1))
+        self.assertTrue(math.isnan(result.runtime_min))
+        self.assertTrue(any("No valid operating point" in w for w in result.warnings))
+
+    def test_zero_throttle_runtime_is_nan_with_warning(self) -> None:
+        result = self.calculator.calculate(CalculationInputs(
+            model_id="TEST:10X5", motor_kv=500, motor_count=1, throttle=0.0))
+        self.assertTrue(math.isnan(result.runtime_min))
+        self.assertTrue(any("No valid operating point" in w for w in result.warnings))
+
+    def test_valid_fixture_runtime_number_unchanged(self) -> None:
+        inputs = CalculationInputs(model_id="TEST:10X5", motor_kv=500, motor_count=1)
+        result = self.calculator.calculate(inputs)
+        self.assertFalse(math.isnan(result.runtime_min))
+        self.assertFalse(any("No valid operating point" in w for w in result.warnings))
+        self.assertAlmostEqual(result.runtime_min, 36.381749970550864, places=8)
 
 
 if __name__ == "__main__":

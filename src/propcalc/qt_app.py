@@ -1178,7 +1178,7 @@ class PropellerMainWindow(QMainWindow):
             "current": f"{p.current_a * inputs.motor_count:,.1f} A",
             "power": self._format_power(p.electrical_power_w * inputs.motor_count),
             "rpm": f"{p.rpm:,.0f}", "tw": f"{result.thrust_to_weight:.2f}",
-            "runtime": f"{result.runtime_min:.1f} min", "esc_margin": f"{result.esc_margin_percent:+.0f}%",
+            "runtime": "—" if math.isnan(result.runtime_min) else f"{result.runtime_min:.1f} min", "esc_margin": f"{result.esc_margin_percent:+.0f}%",
             "battery_margin": f"{result.battery_margin_percent:+.0f}%",
             "structural": "n/a" if result.structural_rpm is None else f"{p.rpm:,.0f} / {result.structural_rpm:,.0f}",
             "confidence": f"{p.confidence * 100:.0f}%", "evidence": f"{self._evidence_name(p.evidence)} · {p.source_type}",
@@ -1305,6 +1305,8 @@ class PropellerMainWindow(QMainWindow):
                 "Від'ємна максимальна потужність мотора; запас не має сенсу.",
             "Non-positive motor_count treated as 1":
                 "Непозитивна кількість моторів; використано 1.",
+            "No valid operating point; runtime is not meaningful":
+                "Немає дійсної робочої точки; час роботи не має сенсу.",
         }
         if warning in exact:
             return exact[warning]
@@ -1980,7 +1982,7 @@ class PropellerMainWindow(QMainWindow):
             key = lambda item: min(item["esc_margin"], item["battery_margin"],
                                    item["rpm_margin"] if item["rpm_margin"] is not None else 100)
         else:
-            key = lambda item: item.get(key_map.get(criterion, "efficiency")) or -1e9
+            key = lambda item: self._compare_sort_value(item.get(key_map.get(criterion, "efficiency")))
         items = sorted(self.compare_items, key=key, reverse=reverse)
         self.compare_table.setRowCount(0)
         for i, item in enumerate(items):
@@ -1988,7 +1990,8 @@ class PropellerMainWindow(QMainWindow):
                       f"{item['current']:.2f}", f"{from_si(item['power'], 'power', self.unit_system):.3g}",
                       f"{from_si(item['torque'], 'torque', self.unit_system):.3g}",
                       f"{item['efficiency'] * 100:.1f}%", f"{item['max_efficiency'] * 100:.1f}%",
-                      f"{item['aero'] * 100:.1f}%", f"{item['tw']:.2f}", f"{item['runtime']:.1f}",
+                      f"{item['aero'] * 100:.1f}%", f"{item['tw']:.2f}",
+                      "n/a" if isinstance(item['runtime'], float) and math.isnan(item['runtime']) else f"{item['runtime']:.1f}",
                       "n/a" if item["recommended_voltage"] is None else f"{item['recommended_voltage']:.1f}",
                       self._margin(item["rpm_margin"]),
                       self._margin(item["esc_margin"]), self._margin(item["motor_margin"]),
@@ -1999,6 +2002,18 @@ class PropellerMainWindow(QMainWindow):
             for column in range(self.compare_table.columnCount()):
                 self.compare_table.item(i, column).setBackground(color)
         self.compare_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+
+    @staticmethod
+    def _compare_sort_value(value: float | None) -> float:
+        """Normalize a compare ranking key: None and NaN sort as -1e9.
+
+        NaN is truthy, so the previous ``value or -1e9`` guard let a NaN
+        runtime through and a meaningless entry could rank #1 (e.g. under
+        "maximum time"). All other values keep the exact old semantics.
+        """
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return -1e9
+        return value or -1e9
 
     @staticmethod
     def _margin(value: float | None) -> str:

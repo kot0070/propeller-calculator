@@ -204,3 +204,63 @@ class QtWarningLocalizationTests(unittest.TestCase):
             finally:
                 window.close()
                 app.processEvents()
+
+
+@requires_qt
+@requires_tiny_db
+class QtCompareNaNRankingTests(unittest.TestCase):
+    """A NaN-runtime entry must never outrank a valid one under maximum time.
+
+    Regression: the compare key was ``item.get(...) or -1e9``; NaN is truthy,
+    so a meaningless entry kept a NaN key and ranked #1 under "maximum time"
+    (descending) for some insertion orders. The key now normalizes None and
+    NaN to -1e9 via PropellerMainWindow._compare_sort_value.
+
+    Uses a tempfile copy of work/build/propellers.seed.db, never the
+    production database.
+    """
+
+    @staticmethod
+    def _item(label: str, runtime: float) -> dict:
+        return {"label": label, "thrust": 10.0, "current": 5.0, "power": 70.0,
+                "torque": 0.05, "efficiency": 0.5, "aero": 0.6,
+                "max_efficiency": 0.55, "recommended_voltage": 14.8,
+                "tw": 1.2, "runtime": runtime, "voltage": 14.8,
+                "rpm_margin": 10.0, "esc_margin": 20.0, "motor_margin": 15.0,
+                "battery_margin": 25.0, "confidence": 0.9,
+                "source": "test", "warnings": "", "mass": 1.5}
+
+    def test_nan_runtime_never_first_under_maximum_time(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        from propcalc.qt_app import PropellerMainWindow
+
+        self.assertEqual(PropellerMainWindow._compare_sort_value(float("nan")), -1e9)
+        self.assertEqual(PropellerMainWindow._compare_sort_value(None), -1e9)
+        self.assertEqual(PropellerMainWindow._compare_sort_value(36.4), 36.4)
+        with tempfile.TemporaryDirectory() as tmp:
+            db_copy = Path(tmp) / "propellers.seed.db"
+            shutil.copy2(TINY_SEED_DB, db_copy)
+            window = PropellerMainWindow(database_path=str(db_copy))
+            try:
+                app.processEvents()
+                combo = window.combos.get("compare_criterion")
+                self.assertIsNotNone(combo)
+                assert combo is not None
+                combo.setCurrentIndex(combo.findData("maximum time"))
+                app.processEvents()
+                orders = (
+                    [self._item("broken", float("nan")), self._item("valid", 36.4)],
+                    [self._item("valid", 36.4), self._item("broken", float("nan"))],
+                )
+                for order in orders:
+                    with self.subTest(order=[item["label"] for item in order]):
+                        window.compare_items = list(order)
+                        window._refresh_compare()
+                        app.processEvents()
+                        self.assertEqual(window.compare_table.item(0, 1).text(), "valid")
+            finally:
+                window.close()
+                app.processEvents()

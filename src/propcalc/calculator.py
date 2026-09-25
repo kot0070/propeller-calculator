@@ -223,13 +223,17 @@ class PropellerCalculator:
 
     def calculate(self, inputs: CalculationInputs) -> CalculationResult:
         point = self.operating_point(inputs)
+        has_operating_point = point is not None
         if point is None:
             point = OperatingPoint()
         total_thrust = point.thrust_n * max(1, inputs.motor_count)
         tw = total_thrust / (max(inputs.mass_kg, 1e-6) * G)
         total_current = point.current_a * max(1, inputs.motor_count)
         chemistry = battery_spec(inputs.battery_type)
-        runtime = inputs.battery_capacity_ah * chemistry["usable_fraction"] / max(total_current, 1e-6) * 60.0
+        if not has_operating_point or not total_current > 0:
+            runtime = float("nan")
+        else:
+            runtime = inputs.battery_capacity_ah * chemistry["usable_fraction"] / max(total_current, 1e-6) * 60.0
         esc_margin = (inputs.esc_current_a - point.current_a) / max(inputs.esc_current_a, 1e-6) * 100.0
         motor_current_margin = (None if inputs.motor_max_current_a is None or inputs.motor_max_current_a <= 0
                                       else (inputs.motor_max_current_a - point.current_a) / inputs.motor_max_current_a * 100.0)
@@ -275,6 +279,8 @@ class PropellerCalculator:
             warnings.append("Negative motor_max_power_w; margin is not meaningful")
         if inputs.motor_count <= 0:
             warnings.append("Non-positive motor_count treated as 1")
+        if not has_operating_point or not total_current > 0:
+            warnings.append("No valid operating point; runtime is not meaningful")
         if missing:
             warnings.append("Simplified-model estimate: missing " + ", ".join(missing))
         if point.extrapolated:
