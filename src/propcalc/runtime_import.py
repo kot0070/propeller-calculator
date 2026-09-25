@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Ivan Soprun. All rights reserved.
 from __future__ import annotations
 
 import csv
@@ -13,8 +14,50 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from .appdata import USER_EXPORT_FORMAT
 from .ingest import IngestSession, SOURCE_SPECS, sha256_file
 from .normalization import compact_apc_alias, normalize_apc
+
+
+# User-owned tables accepted from a *.pudb user-data export. Vendor tables
+# (models, performance_points, geometries, sources, ...) are NEVER merged
+# from such files, even if present.
+USER_MERGE_TABLES = (
+    "motors",
+    "batteries",
+    "frames",
+    "saved_builds",
+    "saved_build_components",
+)
+
+
+def is_user_data_file(path: str | Path) -> bool:
+    """True when the SQLite file carries a user-data export manifest.
+
+    Read-only probe; never raises. Corrupt files and full-corpus databases
+    (no export_manifest table / different format marker) return False.
+    """
+    candidate = Path(path)
+    if not candidate.is_file():
+        return False
+    connection: sqlite3.Connection | None = None
+    try:
+        connection = sqlite3.connect(f"file:{candidate.as_posix()}?mode=ro", uri=True)
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if "export_manifest" not in tables:
+            return False
+        row = connection.execute(
+            "SELECT value FROM export_manifest WHERE key='format'").fetchone()
+        return bool(row and row[0] == USER_EXPORT_FORMAT)
+    except Exception:  # noqa: BLE001 - probe must never raise
+        return False
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:  # noqa: BLE001 - best effort
+                pass
 
 
 class ImportErrorWithReport(RuntimeError):
@@ -90,8 +133,13 @@ class RuntimeImportService:
         import_id = int(cursor.lastrowid)
         self.connection.commit()
         try:
-            if path.suffix.lower() == ".db":
-                detail = self._merge_database(path)
+            if path.suffix.lower() == ".pudb":
+                detail = self._merge_user_data(path)
+            elif path.suffix.lower() == ".db":
+                if is_user_data_file(path):
+                    detail = self._merge_user_data(path)
+                else:
+                    detail = self._merge_database(path)
             elif path.suffix.lower() in {".zip", ".zipx"}:
                 detail = self._import_archive(path)
             elif path.suffix.lower() == ".xlsx":
@@ -291,3 +339,127 @@ class RuntimeImportService:
         source.close()
         return {"source_code": "compatible_database", "files": 1, "updated": updated, "skipped": skipped,
                 "conflicts": conflicts, "records_added": added}
+
+    def _merge_user_data(self, path: Path) -> dict[str, Any]:
+        """Merge a user-only export (*.pudb, or *.db carrying its manifest).
+
+        Validates the export manifest and the user-table subset, then merges
+        ONLY motors/batteries/frames/saved_builds/saved_build_components with
+        ID remapping (existing catalog entries are reused by natural key).
+        Vendor tables are never touched. Builds whose propeller_model_id has
+        no match in the working database keep a NULL reference and are
+        reported in ``model_warnings``/``warnings`` instead of failing.
+        """
+        if path.resolve() == self.database_path.resolve():
+            raise ImportErrorWithReport("The selected database is already the active working database")
+        source = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        source.row_factory = sqlite3.Row
+        try:
+            available = {row[0] for row in source.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+            if "export_manifest" not in available:
+                raise ImportErrorWithReport("User data file is not compatible: export manifest is missing")
+            manifest = {row[0]: row[1] for row in source.execute("SELECT key,value FROM export_manifest")}
+            if manifest.get("format") != USER_EXPORT_FORMAT:
+                raise ImportErrorWithReport(
+                    f"User data file is not compatible: unsupported format {manifest.get('format')!r}")
+            missing = [name for name in USER_MERGE_TABLES if name not in available]
+            if missing:
+                raise ImportErrorWithReport(f"User data file is not compatible: tables missing: {', '.join(missing)}")
+            added = skipped = 0
+            model_warnings: list[str] = []
+            self.connection.execute("BEGIN IMMEDIATE")
+            motor_id_map: dict[int, int] = {}
+            for row in source.execute("SELECT * FROM motors"):
+                existing = self.connection.execute(
+                    "SELECT motor_id FROM motors WHERE name=? AND IFNULL(manufacturer,'')=IFNULL(?, '')",
+                    (row["name"], row["manufacturer"])).fetchone()
+                if existing:
+                    motor_id_map[row["motor_id"]] = int(existing[0])
+                    skipped += 1
+                    continue
+                columns = [key for key in row.keys() if key != "motor_id"]
+                cursor = self.connection.execute(
+                    f"INSERT INTO motors({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
+                    tuple(row[column] for column in columns),
+                )
+                motor_id_map[row["motor_id"]] = int(cursor.lastrowid)
+                added += 1
+            battery_id_map: dict[int, int] = {}
+            for row in source.execute("SELECT * FROM batteries"):
+                existing = self.connection.execute(
+                    "SELECT battery_id FROM batteries WHERE name=?", (row["name"],)).fetchone()
+                if existing:
+                    battery_id_map[row["battery_id"]] = int(existing[0])
+                    skipped += 1
+                    continue
+                columns = [key for key in row.keys() if key != "battery_id"]
+                cursor = self.connection.execute(
+                    f"INSERT INTO batteries({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
+                    tuple(row[column] for column in columns),
+                )
+                battery_id_map[row["battery_id"]] = int(cursor.lastrowid)
+                added += 1
+            frame_id_map: dict[int, int] = {}
+            for row in source.execute("SELECT * FROM frames"):
+                existing = self.connection.execute(
+                    "SELECT frame_id FROM frames WHERE name=?", (row["name"],)).fetchone()
+                if existing:
+                    frame_id_map[row["frame_id"]] = int(existing[0])
+                    skipped += 1
+                    continue
+                columns = [key for key in row.keys() if key != "frame_id"]
+                cursor = self.connection.execute(
+                    f"INSERT INTO frames({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
+                    tuple(row[column] for column in columns),
+                )
+                frame_id_map[row["frame_id"]] = int(cursor.lastrowid)
+                added += 1
+            for row in source.execute("SELECT * FROM saved_builds"):
+                model_id = row["propeller_model_id"]
+                if model_id is not None and self.connection.execute(
+                        "SELECT 1 FROM models WHERE model_id=?", (model_id,)).fetchone() is None:
+                    model_warnings.append(str(model_id))
+                    model_id = None
+                columns = [key for key in row.keys() if key != "build_id"]
+                values = []
+                for column in columns:
+                    if column == "motor_id":
+                        values.append(motor_id_map.get(row[column], row[column]) if row[column] is not None else None)
+                    elif column == "battery_id":
+                        values.append(battery_id_map.get(row[column], row[column]) if row[column] is not None else None)
+                    elif column == "frame_id":
+                        values.append(frame_id_map.get(row[column], row[column]) if row[column] is not None else None)
+                    elif column == "propeller_model_id":
+                        values.append(model_id)
+                    else:
+                        values.append(row[column])
+                cursor = self.connection.execute(
+                    f"INSERT INTO saved_builds({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
+                    tuple(values),
+                )
+                new_build_id = int(cursor.lastrowid)
+                added += 1
+                for component in source.execute(
+                        "SELECT * FROM saved_build_components WHERE build_id=?", (row["build_id"],)):
+                    component_columns = [key for key in component.keys()
+                                         if key not in {"component_id", "build_id"}]
+                    self.connection.execute(
+                        f"INSERT INTO saved_build_components(build_id,{','.join(component_columns)})"
+                        f" VALUES(?{',?' * len(component_columns)})",
+                        (new_build_id,) + tuple(component[column] for column in component_columns),
+                    )
+                    added += 1
+            self.connection.commit()
+        except Exception:
+            try:
+                self.connection.rollback()
+            except Exception:  # noqa: BLE001 - best effort
+                pass
+            raise
+        finally:
+            source.close()
+        warnings = [f"propeller model not in working database: {model_id}" for model_id in sorted(set(model_warnings))]
+        return {"source_code": "user_data", "files": 1, "updated": 0, "skipped": skipped,
+                "conflicts": 0, "records_added": added, "model_warnings": sorted(set(model_warnings)),
+                "warnings": warnings, "manifest_format": manifest.get("format")}

@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Ivan Soprun. All rights reserved.
 from __future__ import annotations
 
 import json
@@ -22,7 +23,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QTableWidget, QTableWidgetItem, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 
-from .appdata import export_database, prepare_working_database
+from .appdata import export_database, export_user_data, file_sha, prepare_working_database
 from .calculator import CalculationInputs, CalculationResult, PropellerCalculator, battery_spec
 from .charts import ChartSeries, LoadChart
 from .config import APP_NAME, APP_VERSION, AUTHOR
@@ -1725,7 +1726,9 @@ class PropellerMainWindow(QMainWindow):
 
     def import_data(self) -> None:
         source, _ = QFileDialog.getOpenFileName(
-            self, self.tr("import"), "", "Supported (*.db *.zip *.zipx *.xlsx *.csv *.dat *.pe0);;All (*.*)")
+            self, self.tr("import"), "",
+            "Supported (*.pudb *.db *.zip *.zipx *.xlsx *.csv *.dat *.pe0);;"
+            "Propeller user data (*.pudb);;SQLite (*.db);;All (*.*)")
         if not source:
             return
         try:
@@ -1739,9 +1742,22 @@ class PropellerMainWindow(QMainWindow):
             QMessageBox.critical(self, APP_NAME, f"{self.tr('import_failed')}:\n{self.tr('details')}: {exc}")
 
     def export_db(self) -> None:
-        target, _ = QFileDialog.getSaveFileName(self, self.tr("export"), "propellers.db", "SQLite (*.db)")
+        """User-only export: saved builds/components, motors, batteries, frames + manifest.
+
+        Full-corpus connection.backup copies stay reserved for the internal
+        backups/ safety copies (import backup, restore safety backup) and are
+        never written from this handler.
+        """
+        target, _ = QFileDialog.getSaveFileName(
+            self, self.tr("export"), "userdata.pudb", "Propeller user data (*.pudb)")
         if target:
-            export_database(self.repository.connection, Path(target))
+            if not target.lower().endswith(".pudb"):
+                target += ".pudb"
+            try:
+                source_sha = file_sha(self.database_path)
+            except OSError:
+                source_sha = ""
+            export_user_data(self.repository.connection, Path(target), source_sha256=source_sha)
             QMessageBox.information(self, APP_NAME, f"{self.tr('exported')}:\n{target}")
 
     def _remove_sidecar_journals(self) -> None:
@@ -2848,6 +2864,9 @@ class PropellerMainWindow(QMainWindow):
         details.setWordWrap(True)
         details.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(details)
+        copyright_notice = QLabel("© 2026 Ivan Soprun · All rights reserved")
+        copyright_notice.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(copyright_notice)
         layout.addStretch(1)
         return tab
 

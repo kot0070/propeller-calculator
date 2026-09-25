@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Ivan Soprun. All rights reserved.
 """Offscreen tests for database restore and PDF report export.
 
 Uses tempfile copies of work/build/propellers.seed.db and stubs all file
@@ -323,6 +324,68 @@ class PdfReportTests(unittest.TestCase):
                 self._assert_pdf(target)
                 leftovers = list(Path(tmp).glob("*.writing"))
                 self.assertEqual(leftovers, [], f"no partial files: {leftovers}")
+            finally:
+                window.close()
+                app.processEvents()
+
+
+@requires_qt
+@requires_tiny_db
+class UserExportHandlerTests(unittest.TestCase):
+    """Database-tab export button writes a user-only *.pudb (never a full backup)."""
+
+    def _make_window(self, app, tmp: str):
+        from propcalc.qt_app import PropellerMainWindow
+        db_copy = Path(tmp) / "work.db"
+        shutil.copy2(TINY_SEED_DB, db_copy)
+        connection = sqlite3.connect(db_copy)
+        cursor = connection.execute("INSERT INTO motors(name) VALUES(?)", ("Handler Motor",))
+        motor_id = int(cursor.lastrowid)
+        connection.execute(
+            "INSERT INTO saved_builds(name,motor_id,motor_kv) VALUES(?,?,?)",
+            ("Handler Build", motor_id, 500.0))
+        connection.commit()
+        connection.close()
+        window = PropellerMainWindow(database_path=str(db_copy))
+        app.processEvents()
+        app.processEvents()
+        return window
+
+    def test_export_db_writes_user_only_pudb(self) -> None:
+        from unittest import mock
+
+        app = _ensure_app()
+        import propcalc.qt_app as qt_app
+
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                target = Path(tmp) / "userdata"  # no extension: handler must append .pudb
+                with (
+                    mock.patch.object(
+                        qt_app.QFileDialog, "getSaveFileName",
+                        return_value=(str(target), "Propeller user data (*.pudb)")),
+                    mock.patch.object(qt_app.QMessageBox, "information"),
+                    mock.patch.object(qt_app.QMessageBox, "critical") as critical,
+                ):
+                    window.export_db()
+                    app.processEvents()
+                self.assertFalse(critical.called)
+                written = Path(str(target) + ".pudb")
+                self.assertTrue(written.is_file())
+                connection = sqlite3.connect(written)
+                try:
+                    tables = {row[0] for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'")}
+                    self.assertNotIn("models", tables)
+                    self.assertNotIn("performance_points", tables)
+                    manifest = {row[0]: row[1] for row in connection.execute(
+                        "SELECT key,value FROM export_manifest")}
+                    self.assertEqual(manifest.get("format"), "propcalc-user-data/1")
+                    self.assertEqual(
+                        connection.execute("SELECT COUNT(*) FROM saved_builds").fetchone()[0], 1)
+                finally:
+                    connection.close()
             finally:
                 window.close()
                 app.processEvents()
