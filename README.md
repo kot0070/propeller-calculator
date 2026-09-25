@@ -13,6 +13,7 @@ Test suites: 41 unit + 14-block UI functional, all green.
 Workbook: 127 tests — 58 PASS / 62 N/A (out-of-scope platforms with evidence) / 7 NOT STARTED (all non-gate).
 Production DB: 1053 models / 335434 points.
 EXE: `Propeller_Calculator_Professional_UA_v3_3.exe`.
+Agent report: \work/AGENT_PERFORMANCE_REPORT.md\ (strengths, weaknesses, recommendations).
 Known residuals: CI workflow pending token scope; screen-reader live hearing + second-twin translations noted; manual taste rows (T043 CTA etc.) open.
 
 ## Ready application
