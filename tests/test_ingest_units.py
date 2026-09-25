@@ -91,6 +91,45 @@ class ResolveUiucModelUnitsTest(unittest.TestCase):
         self.assertIsNone(model.diameter_m)
         self.assertIsNone(model.pitch_m)
 
+    def test_dropped_decimal_sibling_designations(self) -> None:
+        # Spec "12 x 6.5" is filed as "12x65"; spec "13 x 6.5" as "13x65"
+        # (volume-3 oracle page). resolve_uiuc_model must restore the decimal.
+        cases = (
+            ("ancf_12x65", 12.0 * INCH_M, 6.5 * INCH_M),  # 0.3048 / 0.1651
+            ("ancf_13x65", 13.0 * INCH_M, 6.5 * INCH_M),  # 0.3302 / 0.1651
+        )
+        for raw_name, diameter_m, pitch_m in cases:
+            with self.subTest(raw_name=raw_name):
+                model = resolve_uiuc_model(raw_name)
+                self.assertAlmostEqual(model.diameter_m, diameter_m, places=9)
+                self.assertAlmostEqual(model.pitch_m, pitch_m, places=9)
+
+    def test_sibling_designations_resolve_from_real_filenames(self) -> None:
+        cases = (
+            ("ancf_12x65_static_0806od.txt", "static_experiment", 12.0 * INCH_M, 6.5 * INCH_M),
+            ("ancf_12x65_0807od_3032.txt", "dynamic_experiment", 12.0 * INCH_M, 6.5 * INCH_M),
+            ("ancf_13x65_static_0570od.txt", "static_experiment", 13.0 * INCH_M, 6.5 * INCH_M),
+        )
+        for filename, category, diameter_m, pitch_m in cases:
+            with self.subTest(filename=filename):
+                raw_model = IngestSession.uiuc_raw_model(Path(filename), category)
+                model = resolve_uiuc_model(raw_model)
+                self.assertAlmostEqual(model.diameter_m, diameter_m, places=9)
+                self.assertAlmostEqual(model.pitch_m, pitch_m, places=9)
+
+    def test_near_miss_inch_designations_unchanged(self) -> None:
+        # "12x6" is spec "12 x 6" (not "12 x 6.5") and "12x9" is spec
+        # "12 x 9" (not "12.5 x 9"); both must pass through as plain inches.
+        cases = (
+            ("ancf_12x6", 12.0 * INCH_M, 6.0 * INCH_M),
+            ("ancf_12x9", 12.0 * INCH_M, 9.0 * INCH_M),
+        )
+        for raw_name, diameter_m, pitch_m in cases:
+            with self.subTest(raw_name=raw_name):
+                model = resolve_uiuc_model(raw_name)
+                self.assertAlmostEqual(model.diameter_m, diameter_m, places=9)
+                self.assertAlmostEqual(model.pitch_m, pitch_m, places=9)
+
 
 if __name__ == "__main__":
     unittest.main()
