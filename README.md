@@ -6,6 +6,15 @@ Author: **Ivan Soprun**. Offline Windows application for calculating and compari
 
 The repository contains the original code, tests, data-processing scripts, build materials, the user guide, and reports. The ready EXE, embedded database, and source datasets are stored in the [private release v3.3.0](https://github.com/kot0070/propeller-calculator/releases/tag/v3.3.0).
 
+## MVP status — 3.3.0
+
+Status: **MVP RELEASE CANDIDATE**. All 14 release gates PASS.
+Test suites: 41 unit + 14-block UI functional, all green.
+Workbook: 127 tests — 58 PASS / 62 N/A (out-of-scope platforms with evidence) / 7 NOT STARTED (all non-gate).
+Production DB: 1053 models / 335434 points.
+EXE: `Propeller_Calculator_Professional_UA_v3_3.exe`.
+Known residuals: CI workflow pending token scope; screen-reader live hearing + second-twin translations noted; manual taste rows (T043 CTA etc.) open.
+
 ## Ready application
 
 Download `Propeller_Calculator_Professional_UA_v3_3.exe` from the release. Python and installation are not required. User guide: [outputs/README_UA.md](outputs/README_UA.md); the full PDF is in `outputs/`.
