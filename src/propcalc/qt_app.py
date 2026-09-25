@@ -75,6 +75,14 @@ DEFAULTS = {
 FRAME_SIZE_PRESETS_MM = (65, 75, 85, 100, 120, 150, 180, 210, 250, 300, 330, 350,
                          400, 450, 500, 550, 600, 650, 700, 800, 1000)
 
+# Build-card fields whose unsaved edits gate the close confirmation.
+# Calculator inputs are intentionally excluded: they are live-computed and
+# only become persistent when saved as a build.
+BUILD_DIRTY_KEYS = frozenset({
+    "build_name", "motor_name", "battery_name", "esc_name", "frame_name",
+    "build_payload",
+})
+
 ACCESSORY_DEFAULTS: tuple[dict[str, Any], ...] = (
     {"category": "flight_controller", "model": "", "quantity": 1, "mass_kg": 0.015, "enabled": True},
     {"category": "power_distribution", "model": "", "quantity": 1, "mass_kg": 0.020, "enabled": True},
@@ -370,6 +378,10 @@ class PropellerMainWindow(QMainWindow):
         self.tooltips_enabled = self._setting("tooltips", "1") == "1"
         self.state = dict(DEFAULTS)
         self.build_accessories = [dict(item) for item in ACCESSORY_DEFAULTS]
+        # Unsaved build-card edits (name/part names/payload/description/note/
+        # accessories). Set on user edits, cleared on save/update/select/import.
+        # Calculator inputs never set it (see BUILD_DIRTY_KEYS).
+        self._dirty = False
         self._updating_accessories = False
         self._accessory_mass_applied_kg = 0.0
         self._loading_preset = False
@@ -414,8 +426,49 @@ class PropellerMainWindow(QMainWindow):
         return UI_TEXT[self.language].get(key, key)
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        if getattr(self, "_dirty", False):
+            if not self._confirm(self.tr("confirm_close")):
+                event.ignore()
+                return
         self.repository.close()
         event.accept()
+
+    def _confirm_box(self, text: str, informative: str = "") -> QMessageBox:
+        """Yes/No question with the safe answer as explicit default + escape."""
+        box = QMessageBox(self)
+        box.setWindowTitle(APP_NAME)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(text)
+        if informative:
+            box.setInformativeText(informative)
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        box.setEscapeButton(QMessageBox.StandardButton.No)
+        return box
+
+    def _confirm(self, text: str, informative: str = "") -> bool:
+        return self._confirm_box(text, informative).exec() == QMessageBox.StandardButton.Yes
+
+    def _mark_dirty(self) -> None:
+        self._dirty = True
+
+    def _clear_dirty(self) -> None:
+        self._dirty = False
+
+    def _ready_message(self) -> str:
+        return f"{self.tr('ready_status')} · {AUTHOR} · {self.database_path}"
+
+    def _begin_busy(self) -> None:
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        self.statusBar().showMessage(self.tr("busy_working"))
+        QApplication.processEvents()
+
+    def _end_busy(self) -> None:
+        try:
+            QApplication.restoreOverrideCursor()
+        finally:
+            self.statusBar().showMessage(self._ready_message())
 
     def _snapshot(self) -> None:
         self._snapshot_accessories()
@@ -618,6 +671,8 @@ class PropellerMainWindow(QMainWindow):
             if widget is not source and widget.text() != value:
                 with QSignalBlocker(widget):
                     widget.setText(value)
+        if key in BUILD_DIRTY_KEYS:
+            self._mark_dirty()
         if not self._loading_preset and key in {
             "voltage", "throttle", "kv", "speed", "mass", "motors", "esc", "capacity",
             "c_rating", "battery_s", "rm", "i0", "motor_max_current", "motor_max_power", "density",
@@ -1731,6 +1786,11 @@ class PropellerMainWindow(QMainWindow):
             "Propeller user data (*.pudb);;SQLite (*.db);;All (*.*)")
         if not source:
             return
+        if not self._confirm(
+                self.tr("confirm_import"),
+                self.tr("confirm_import_info").format(source=source)):
+            return
+        self._begin_busy()
         try:
             service = RuntimeImportService(self.repository.connection, self.database_path, self.paths["backups"])
             report = service.import_path(source)
@@ -1740,6 +1800,8 @@ class PropellerMainWindow(QMainWindow):
             self._build_ui()
         except Exception as exc:
             QMessageBox.critical(self, APP_NAME, f"{self.tr('import_failed')}:\n{self.tr('details')}: {exc}")
+        finally:
+            self._end_busy()
 
     def export_db(self) -> None:
         """User-only export: saved builds/components, motors, batteries, frames + manifest.
@@ -1753,11 +1815,15 @@ class PropellerMainWindow(QMainWindow):
         if target:
             if not target.lower().endswith(".pudb"):
                 target += ".pudb"
+            self._begin_busy()
             try:
-                source_sha = file_sha(self.database_path)
-            except OSError:
-                source_sha = ""
-            export_user_data(self.repository.connection, Path(target), source_sha256=source_sha)
+                try:
+                    source_sha = file_sha(self.database_path)
+                except OSError:
+                    source_sha = ""
+                export_user_data(self.repository.connection, Path(target), source_sha256=source_sha)
+            finally:
+                self._end_busy()
             QMessageBox.information(self, APP_NAME, f"{self.tr('exported')}:\n{target}")
 
     def _remove_sidecar_journals(self) -> None:
@@ -1824,6 +1890,22 @@ class PropellerMainWindow(QMainWindow):
             "", "SQLite (*.db)")
         if not source:
             return
+        # Fail closed before asking anything: an unusable file gets the error
+        # dialog directly, never a replace confirmation.
+        ok, message = validate_restore_candidate(source)
+        if not ok:
+            QMessageBox.critical(
+                self, APP_NAME,
+                ("Відновлення не виконано" if self.language == "uk" else "Restore failed")
+                + f":\n{self.tr('details')}: {message}")
+            return
+        if not self._confirm(
+                self.tr("confirm_restore"),
+                self.tr("confirm_restore_info").format(
+                    source=source, target=self.database_path,
+                    backups=self.paths["backups"])):
+            return
+        self._begin_busy()
         try:
             backup = self.restore_database_from_path(source)
         except Exception as exc:  # noqa: BLE001 - user-facing slot
@@ -1832,6 +1914,8 @@ class PropellerMainWindow(QMainWindow):
                 ("Відновлення не виконано" if self.language == "uk" else "Restore failed")
                 + f":\n{self.tr('details')}: {exc}")
             return
+        finally:
+            self._end_busy()
         self._snapshot()
         self._build_ui()
         QMessageBox.information(
@@ -2172,6 +2256,7 @@ class PropellerMainWindow(QMainWindow):
         if self._updating_accessories:
             return
         self._snapshot_accessories()
+        self._mark_dirty()
         self._refresh_accessory_table()
 
     def _update_accessory_total(self) -> None:
@@ -2188,6 +2273,7 @@ class PropellerMainWindow(QMainWindow):
         self._snapshot_accessories()
         self.build_accessories.append(
             {"category": "other", "model": "", "quantity": 1, "mass_kg": 0.0, "enabled": True})
+        self._mark_dirty()
         self._refresh_accessory_table()
         self.accessory_table.setCurrentCell(self.accessory_table.rowCount() - 1, 2)
 
@@ -2196,10 +2282,12 @@ class PropellerMainWindow(QMainWindow):
         row = self.accessory_table.currentRow() if hasattr(self, "accessory_table") else -1
         if 0 <= row < len(self.build_accessories):
             self.build_accessories.pop(row)
+            self._mark_dirty()
             self._refresh_accessory_table()
 
     def _reset_accessories(self) -> None:
         self.build_accessories = [dict(item) for item in ACCESSORY_DEFAULTS]
+        self._mark_dirty()
         self._refresh_accessory_table()
 
     def _apply_accessory_mass_to_payload(self) -> None:
@@ -2208,6 +2296,7 @@ class PropellerMainWindow(QMainWindow):
             float(item.get("mass_kg", 0)) * max(1, int(item.get("quantity", 1)))
             for item in self.build_accessories if item.get("enabled"))
         self._set_text_value("build_payload", f"{from_si(total_kg, 'mass_kg', self.unit_system):.10g}")
+        self._mark_dirty()
         try:
             current_mass_kg = float(to_si(float(self.state["mass"]), "mass_kg", self.unit_system))
             base_mass_kg = max(0.0, current_mass_kg - self._accessory_mass_applied_kg)
@@ -2297,10 +2386,12 @@ class PropellerMainWindow(QMainWindow):
         self.build_description = QPlainTextEdit(self.state["build_description"])
         self.build_description.setMaximumHeight(95)
         self.build_description.setPlaceholderText(self.tr("description_hint"))
+        self.build_description.textChanged.connect(self._mark_dirty)
         form.addRow(self.tr("description"), self.build_description)
         self.build_note = QPlainTextEdit(self.state["build_note"])
         self.build_note.setMaximumHeight(85)
         self.build_note.setPlaceholderText(self.tr("note_hint"))
+        self.build_note.textChanged.connect(self._mark_dirty)
         form.addRow(self.tr("note"), self.build_note)
         note = QLabel(self.tr("build_capture_note"))
         note.setWordWrap(True)
@@ -2380,12 +2471,14 @@ class PropellerMainWindow(QMainWindow):
         self._refresh_accessory_table()
         payload_display = from_si(float(row["payload_kg"] or 0), "mass_kg", self.unit_system)
         self.edits["build_payload"].setText(f"{payload_display:.10g}")
+        self._clear_dirty()
 
     def save_build_new(self) -> None:
         try:
             self._sync_build_text()
             self.current_build_id = self.repository.save_build(self._payload())
             self._refresh_builds()
+            self._clear_dirty()
         except Exception as exc:
             QMessageBox.critical(self, APP_NAME, f"{self.tr('calculation_error')}:\n{self.tr('details')}: {exc}")
 
@@ -2402,22 +2495,27 @@ class PropellerMainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, APP_NAME, f"{self.tr('calculation_error')}:\n{self.tr('details')}: {exc}")
             return
+        # Payload parses: only now ask for the destructive overwrite.
+        if not self._confirm(self.tr("confirm_update")):
+            return
         self.repository.save_build(payload, self.current_build_id)
         self._refresh_builds()
+        self._clear_dirty()
 
     def delete_build(self) -> None:
         if self.current_build_id is None:
             return
-        answer = QMessageBox.question(self, APP_NAME, self.tr("delete_confirm"))
-        if answer == QMessageBox.StandardButton.Yes:
+        if self._confirm(self.tr("delete_confirm")):
             self.repository.delete_build(self.current_build_id)
             self.current_build_id = None
             self._refresh_builds()
+            self._clear_dirty()
 
     def duplicate_build(self) -> None:
         if self.current_build_id is not None:
             self.current_build_id = self.repository.duplicate_build(self.current_build_id)
             self._refresh_builds()
+            self._clear_dirty()
 
     def export_build(self) -> None:
         self._sync_build_text()
@@ -2441,6 +2539,7 @@ class PropellerMainWindow(QMainWindow):
             payload = json.loads(Path(source).read_text(encoding="utf-8"))
             self.current_build_id = self.repository.save_build(payload)
             self._refresh_builds()
+            self._clear_dirty()
         except Exception as exc:
             QMessageBox.critical(self, APP_NAME, f"{self.tr('import_failed')}:\n{self.tr('details')}: {exc}")
 

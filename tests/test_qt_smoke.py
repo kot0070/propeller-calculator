@@ -482,3 +482,444 @@ class QtCalcInputErrorTests(unittest.TestCase):
             finally:
                 window.close()
                 app.processEvents()
+
+
+@requires_qt
+@requires_tiny_db
+class QtBusyConfirmTests(unittest.TestCase):
+    """T044/P010: busy cursor around import/export/restore + safe confirm gates.
+
+    All dialogs are stubbed (file dialogs + _confirm/information/critical);
+    never touches the production database (tempfile copies of the tiny seed).
+    """
+
+    def _make_window(self, app, tmp: str, name: str = "work.db"):
+        from propcalc.qt_app import PropellerMainWindow
+
+        db_copy = Path(tmp) / name
+        shutil.copy2(TINY_SEED_DB, db_copy)
+        window = PropellerMainWindow(database_path=str(db_copy))
+        app.processEvents()
+        app.processEvents()
+        return window
+
+    @staticmethod
+    def _make_minimal_valid_db(path: Path) -> Path:
+        import sqlite3
+
+        from propcalc.database import initialize_database
+
+        connection = sqlite3.connect(path)
+        try:
+            initialize_database(connection)
+            cursor = connection.execute(
+                "INSERT INTO sources(code,name,source_group,source_kind,archive_name,"
+                "archive_sha256,archive_bytes) VALUES(?,?,?,?,?,?,?)",
+                ("TEST_SRC", "Test source", "test", "test", "test.zip", "00" * 32, 1))
+            source_id = int(cursor.lastrowid)
+            connection.execute(
+                "INSERT INTO source_files(source_id,relative_path,sha256,file_bytes,status)"
+                " VALUES(?,?,?,?,?)",
+                (source_id, "test/file.dat", "11" * 32, 1, "parsed"))
+            connection.execute(
+                "INSERT INTO models(model_id,original_name,diameter_m) VALUES(?,?,?)",
+                ("TEST:10X5", "Test 10x5", 0.254))
+            connection.commit()
+        finally:
+            connection.close()
+        return path
+
+    @staticmethod
+    def _make_user_pudb(path: Path) -> Path:
+        """Export a valid .pudb (with one motor + build) for import tests."""
+        import sqlite3
+
+        from propcalc.appdata import export_user_data, file_sha
+
+        src = path.parent / "src.db"
+        shutil.copy2(TINY_SEED_DB, src)
+        connection = sqlite3.connect(src)
+        connection.row_factory = sqlite3.Row
+        try:
+            cursor = connection.execute("INSERT INTO motors(name) VALUES(?)", ("Import Motor",))
+            motor_id = int(cursor.lastrowid)
+            connection.execute(
+                "INSERT INTO saved_builds(name,motor_id,motor_kv) VALUES(?,?,?)",
+                ("Import Build", motor_id, 500.0))
+            connection.commit()
+            source_sha = file_sha(src)
+            export_user_data(connection, path, source_sha256=source_sha)
+        finally:
+            connection.close()
+        try:
+            src.unlink()  # only the .pudb is needed; drop the staging file early
+        except OSError:
+            pass
+        return path
+
+    def _save_one_build(self, app, window):
+        """Create one saved build via the real slot; returns its build_id."""
+        from unittest import mock
+
+        import propcalc.qt_app as qt_app
+
+        # The tiny seed is schema-only (no models) and saved_builds has a
+        # models FK: insert one model row first, then save via the real slot.
+        import sqlite3
+
+        seed = sqlite3.connect(window.database_path)
+        try:
+            seed.execute(
+                "INSERT OR IGNORE INTO models(model_id,original_name,diameter_m)"
+                " VALUES(?,?,?)",
+                ("TEST:10X5", "Test 10x5", 0.254))
+            seed.commit()
+        finally:
+            seed.close()
+        window.repository.clear_caches()
+        window.selected_model_id = "TEST:10X5"
+        with (
+            mock.patch.object(qt_app.QMessageBox, "critical") as critical,
+            mock.patch.object(qt_app.QMessageBox, "information"),
+        ):
+            window.save_build_new()
+            app.processEvents()
+        self.assertFalse(critical.called)
+        self.assertIsNotNone(window.current_build_id)
+        assert window.current_build_id is not None
+        return window.current_build_id
+
+    def test_confirm_box_defaults_to_safe_no(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication, QMessageBox
+
+        app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                box = window._confirm_box("probe")
+                buttons = box.standardButtons()
+                self.assertTrue(buttons & QMessageBox.StandardButton.Yes)
+                self.assertTrue(buttons & QMessageBox.StandardButton.No)
+                no_button = box.button(QMessageBox.StandardButton.No)
+                self.assertIsNotNone(no_button)
+                self.assertEqual(box.defaultButton(), no_button)
+                self.assertEqual(box.escapeButton(), no_button)
+            finally:
+                window.close()
+                app.processEvents()
+
+    def test_localization_keys_present_both_languages(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                for language in ("uk", "en"):
+                    with self.subTest(language=language):
+                        window.language = language
+                        for key in ("busy_working", "confirm_restore", "confirm_restore_info",
+                                    "confirm_import", "confirm_import_info",
+                                    "confirm_update", "confirm_close"):
+                            text = window.tr(key)
+                            self.assertNotEqual(text, key, f"missing {key} for {language}")
+                            self.assertTrue(text.strip(), f"empty {key} for {language}")
+            finally:
+                window.close()
+                app.processEvents()
+
+    def test_export_busy_cursor_restored(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from unittest import mock
+
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        import propcalc.qt_app as qt_app
+
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                target = Path(tmp) / "userdata"  # no extension: handler appends .pudb
+                with (
+                    mock.patch.object(
+                        qt_app.QFileDialog, "getSaveFileName",
+                        return_value=(str(target), "Propeller user data (*.pudb)")),
+                    mock.patch.object(qt_app.QMessageBox, "information"),
+                    mock.patch.object(qt_app.QMessageBox, "critical") as critical,
+                ):
+                    window.export_db()
+                    app.processEvents()
+                self.assertFalse(critical.called)
+                self.assertTrue(Path(str(target) + ".pudb").is_file())
+                self.assertIsNone(QApplication.overrideCursor())
+                self.assertNotIn(window.tr("busy_working"), window.statusBar().currentMessage())
+            finally:
+                window.close()
+                app.processEvents()
+
+    def test_import_confirm_no_aborts_with_zero_change(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from unittest import mock
+
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        import propcalc.qt_app as qt_app
+
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                import hashlib
+
+                before = hashlib.sha256(window.database_path.read_bytes()).hexdigest()
+                builds_before = len(window.repository.builds())
+                backups_before = set(window.paths["backups"].glob("*"))
+                with (
+                    mock.patch.object(
+                        qt_app.QFileDialog, "getOpenFileName",
+                        return_value=(str(Path(tmp) / "whatever.pudb"),
+                                      "Propeller user data (*.pudb)")),
+                    mock.patch.object(window, "_confirm", return_value=False) as confirm,
+                    mock.patch.object(qt_app.QMessageBox, "information") as info,
+                    mock.patch.object(qt_app.QMessageBox, "critical") as critical,
+                ):
+                    window.import_data()
+                    app.processEvents()
+                self.assertEqual(confirm.call_count, 1)
+                self.assertFalse(info.called)
+                self.assertFalse(critical.called)
+                self.assertEqual(len(window.repository.builds()), builds_before)
+                self.assertEqual(
+                    hashlib.sha256(window.database_path.read_bytes()).hexdigest(), before)
+                self.assertEqual(set(window.paths["backups"].glob("*")), backups_before)
+                self.assertIsNone(QApplication.overrideCursor())
+            finally:
+                window.close()
+                app.processEvents()
+
+    def test_import_confirm_yes_proceeds_busy_restored(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from unittest import mock
+
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        import propcalc.qt_app as qt_app
+
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                pudb = self._make_user_pudb(Path(tmp) / "user.pudb")
+                builds_before = len(window.repository.builds())
+                with (
+                    mock.patch.object(
+                        qt_app.QFileDialog, "getOpenFileName",
+                        return_value=(str(pudb), "Propeller user data (*.pudb)")),
+                    mock.patch.object(window, "_confirm", return_value=True) as confirm,
+                    mock.patch.object(qt_app.QMessageBox, "information") as info,
+                    mock.patch.object(qt_app.QMessageBox, "critical") as critical,
+                ):
+                    window.import_data()
+                    app.processEvents()
+                self.assertEqual(confirm.call_count, 1)
+                self.assertFalse(critical.called)
+                self.assertTrue(info.called)
+                names = [row["name"] for row in window.repository.builds()]
+                self.assertIn("Import Build", names)
+                self.assertGreater(len(names), builds_before)
+                self.assertIsNone(QApplication.overrideCursor())
+                self.assertNotIn(window.tr("busy_working"), window.statusBar().currentMessage())
+            finally:
+                window.close()
+                app.processEvents()
+
+    def test_restore_confirm_no_aborts_with_zero_change(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from unittest import mock
+
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        import propcalc.qt_app as qt_app
+
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                import hashlib
+
+                candidate = self._make_minimal_valid_db(Path(tmp) / "candidate.db")
+                before = hashlib.sha256(window.database_path.read_bytes()).hexdigest()
+                backups_before = set(window.paths["backups"].glob("*.db"))
+                with (
+                    mock.patch.object(
+                        qt_app.QFileDialog, "getOpenFileName",
+                        return_value=(str(candidate), "SQLite (*.db)")),
+                    mock.patch.object(window, "_confirm", return_value=False) as confirm,
+                    mock.patch.object(qt_app.QMessageBox, "information") as info,
+                    mock.patch.object(qt_app.QMessageBox, "critical") as critical,
+                ):
+                    window.restore_database()
+                    app.processEvents()
+                self.assertEqual(confirm.call_count, 1)
+                self.assertFalse(info.called)
+                self.assertFalse(critical.called)
+                self.assertEqual(
+                    hashlib.sha256(window.database_path.read_bytes()).hexdigest(), before)
+                self.assertEqual(set(window.paths["backups"].glob("*.db")), backups_before)
+                self.assertIsNone(QApplication.overrideCursor())
+                # Repository still functional on the untouched original.
+                self.assertIn("models", window.repository.summary())
+            finally:
+                window.close()
+                app.processEvents()
+
+    def test_restore_confirm_yes_proceeds_busy_restored(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from unittest import mock
+
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        import propcalc.qt_app as qt_app
+
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                candidate = self._make_minimal_valid_db(Path(tmp) / "candidate.db")
+                backups_before = set(window.paths["backups"].glob("*.db"))
+                with (
+                    mock.patch.object(
+                        qt_app.QFileDialog, "getOpenFileName",
+                        return_value=(str(candidate), "SQLite (*.db)")),
+                    mock.patch.object(window, "_confirm", return_value=True) as confirm,
+                    mock.patch.object(qt_app.QMessageBox, "information") as info,
+                    mock.patch.object(qt_app.QMessageBox, "critical") as critical,
+                ):
+                    window.restore_database()
+                    app.processEvents()
+                self.assertEqual(confirm.call_count, 1)
+                self.assertFalse(critical.called)
+                self.assertTrue(info.called)
+                fresh_backups = set(window.paths["backups"].glob("*.db"))
+                self.assertGreater(len(fresh_backups), len(backups_before))
+                summary = window.repository.summary()
+                self.assertGreater(int(summary.get("models", 0)), 0)
+                self.assertIsNone(QApplication.overrideCursor())
+                self.assertNotIn(window.tr("busy_working"), window.statusBar().currentMessage())
+            finally:
+                window.close()
+                app.processEvents()
+
+    def test_update_confirm_no_aborts_yes_proceeds(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from unittest import mock
+
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                build_id = self._save_one_build(app, window)
+                original = str(window.repository.get_build(build_id)["name"])
+                # Simulate a user edit of the build card (widget holds the new
+                # text and the textEdited slot marks the card dirty).
+                window.edits["build_name"].setText("Renamed Build")
+                window._sync_edit_value("build_name", "Renamed Build",
+                                        window.edits["build_name"])
+                app.processEvents()
+                self.assertTrue(window._dirty)
+                with mock.patch.object(window, "_confirm", return_value=False) as confirm:
+                    window.update_build()
+                    app.processEvents()
+                self.assertEqual(confirm.call_count, 1)
+                self.assertEqual(window.repository.get_build(build_id)["name"], original)
+                self.assertTrue(window._dirty, "aborted overwrite must stay dirty")
+                with mock.patch.object(window, "_confirm", return_value=True) as confirm:
+                    window.update_build()
+                    app.processEvents()
+                self.assertEqual(confirm.call_count, 1)
+                self.assertEqual(window.repository.get_build(build_id)["name"], "Renamed Build")
+                self.assertFalse(window._dirty, "successful overwrite clears dirty")
+            finally:
+                window.close()
+                app.processEvents()
+
+    def test_delete_confirm_no_aborts_yes_proceeds(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from unittest import mock
+
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                build_id = self._save_one_build(app, window)
+                count_before = len(window.repository.builds())
+                with mock.patch.object(window, "_confirm", return_value=False) as confirm:
+                    window.delete_build()
+                    app.processEvents()
+                self.assertEqual(confirm.call_count, 1)
+                self.assertEqual(len(window.repository.builds()), count_before)
+                self.assertEqual(window.current_build_id, build_id)
+                with mock.patch.object(window, "_confirm", return_value=True) as confirm:
+                    window.delete_build()
+                    app.processEvents()
+                self.assertEqual(confirm.call_count, 1)
+                self.assertEqual(len(window.repository.builds()), count_before - 1)
+                self.assertIsNone(window.current_build_id)
+            finally:
+                window.close()
+                app.processEvents()
+
+    def test_close_dirty_confirm(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from unittest import mock
+
+        from PySide6.QtGui import QCloseEvent
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as tmp:
+            # Clean window: close must not ask and must be accepted.
+            window = self._make_window(app, tmp)
+            try:
+                self.assertFalse(window._dirty)
+                with mock.patch.object(window, "_confirm") as confirm:
+                    event = QCloseEvent()
+                    window.closeEvent(event)
+                    app.processEvents()
+                confirm.assert_not_called()
+                self.assertTrue(event.isAccepted())
+            finally:
+                # Repository was closed by the accepted closeEvent; sqlite
+                # close() is idempotent so a second close is harmless.
+                window.close()
+                app.processEvents()
+            # Dirty window: No keeps it open, Yes closes.
+            window = self._make_window(app, tmp, name="work2.db")
+            try:
+                window._sync_edit_value("build_name", "unsaved",
+                                        window.edits["build_name"])
+                self.assertTrue(window._dirty)
+                with mock.patch.object(window, "_confirm", return_value=False) as confirm:
+                    event = QCloseEvent()
+                    window.closeEvent(event)
+                    app.processEvents()
+                self.assertEqual(confirm.call_count, 1)
+                self.assertFalse(event.isAccepted())
+                with mock.patch.object(window, "_confirm", return_value=True) as confirm:
+                    event = QCloseEvent()
+                    window.closeEvent(event)
+                    app.processEvents()
+                self.assertEqual(confirm.call_count, 1)
+                self.assertTrue(event.isAccepted())
+                # Clear the flag so the finally teardown cannot raise a real dialog.
+                window._dirty = False
+            finally:
+                window.close()
+                app.processEvents()
