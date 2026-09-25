@@ -25,6 +25,7 @@ from .normalization import (
 
 
 AIR_DENSITY = 1.225
+WATER_DENSITY = 1000.0
 LBF_N = 4.4482216152605
 HP_W = 745.6998715822702
 IN_LBF_NM = 0.1129848290276167
@@ -681,9 +682,16 @@ class IngestSession:
                                  category=category, parser="apc-dat-classifier", raw_lines=len(lines), reason=reason)
                 continue
             raw_name = name_match.group(1)
-            medium = "water" if "PERFILES2-MARINE" in relative.upper() else "air"
+            is_marine = "PERFILES2-MARINE" in relative.upper() or "(UNDERWATER)" in text.upper()
+            medium = "water" if is_marine else "air"
+            density = WATER_DENSITY if is_marine else AIR_DENSITY
             model = self.resolve_apc_prediction_model(raw_name, medium)
             self.ensure_model(model, has_prediction=True)
+            if is_marine:
+                # ensure_model keeps the first-seen (catalog 'air') medium, so
+                # marine predictions must explicitly win for underwater models.
+                self.connection.execute(
+                    "UPDATE models SET medium='water' WHERE model_id=? AND medium!='water'", (model.model_id,))
             self.map_model(code, model)
             current_rpm: float | None = None
             parsed = 0
@@ -705,7 +713,7 @@ class IngestSession:
                 speed_mph, j, efficiency, ct, cp, _hp, _torque_imperial, _thrust_imperial, power_w, torque_nm, thrust_n = nums[:11]
                 values = {"rpm": current_rpm, "j": j, "speed_m_s": speed_mph * 0.44704, "ct": ct, "cp": cp,
                           "efficiency": efficiency, "thrust_n": thrust_n, "power_w": power_w, "torque_nm": torque_nm,
-                          "density": AIR_DENSITY, "is_static": abs(j or 0.0) < 1e-12}
+                          "density": density, "is_static": abs(j or 0.0) < 1e-12}
                 self.upsert_performance(code, relative, model, source_row, values, line, "prediction",
                                         "APC manufacturer numerical prediction")
                 parsed += 1
