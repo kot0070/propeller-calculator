@@ -70,7 +70,7 @@ EXE-пакувальник: PyInstaller 6.21.0 з офіційного PyPI
 
 | Перевірка | Результат |
 |---|---|
-| Python automated suite: static/dynamic/air/water/units/source-point/battery/import/persistence/accessories | PASS — 12/12 |
+| Python automated suite: static/dynamic/air/water/units/source-point/battery/import/persistence/accessories | PASS — 41/41 + 14-block UI functional |
 | SQLite quick_check / foreign_key_check | PASS — ok / 0 |
 | Повторний merge того самого DB | PASS — кількість точок не зросла |
 | Оновлення зміненої та додавання нової точки | PASS |
