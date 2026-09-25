@@ -941,14 +941,15 @@ class PropellerMainWindow(QMainWindow):
         layout.addWidget(label)
         return group
 
-    def _source_math_group(self) -> QGroupBox:
+    def _source_math_group(self, table_name: str = "referenceTable") -> QGroupBox:
         group = QGroupBox(self.tr("source_vs_math"))
         layout = QVBoxLayout(group)
         note = QLabel(self.tr("source_math_note"))
         note.setWordWrap(True)
         layout.addWidget(note)
         table = self._table([self.tr("method"), "RPM", "J", "Ct", "Cp", "η / FOM",
-                             self.tr("thrust_per_motor"), self.tr("prop_power_per_motor"), self.tr("source")])
+                             self.tr("thrust_per_motor"), self.tr("prop_power_per_motor"), self.tr("source")],
+                            table_name)
         table.setRowCount(2)
         table.setMaximumHeight(116)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -994,7 +995,7 @@ class PropellerMainWindow(QMainWindow):
         simple_cards = (("thrust", "thrust_card"), ("current", "total_current_card"), ("power", "total_power_card"),
                         ("rpm", "rpm_card"), ("tw", "tw_card"), ("runtime", "runtime_card"))
         right_layout.addWidget(self._result_card_grid(simple_cards, self.simple_result_labels))
-        right_layout.addWidget(self._source_math_group())
+        right_layout.addWidget(self._source_math_group("referenceTableSimple"))
         note = QLabel(self.tr("simple_summary"))
         note.setWordWrap(True)
         right_layout.addWidget(note)
@@ -1054,7 +1055,7 @@ class PropellerMainWindow(QMainWindow):
                  ("battery_margin", "battery_margin_card"), ("structural", "structural_card"),
                  ("confidence", "confidence_card"), ("evidence", "evidence_card"))
         right_layout.addWidget(self._result_card_grid(cards, self.result_labels))
-        right_layout.addWidget(self._source_math_group())
+        right_layout.addWidget(self._source_math_group("referenceTableEngineering"))
 
         efficiency = QGroupBox(self.tr("efficiency"))
         eff = QGridLayout(efficiency)
@@ -1392,8 +1393,11 @@ class PropellerMainWindow(QMainWindow):
              ChartSeries(self.tr("powertrain"), "#C792EA", system_points)], marker_x=marker)
 
     @staticmethod
-    def _table(headers: list[str]) -> QTableWidget:
+    def _table(headers: list[str], name: str = "") -> QTableWidget:
         table = QTableWidget(0, len(headers))
+        if name:
+            table.setObjectName(name)
+            table.setAccessibleName(name)
         table.setHorizontalHeaderLabels(headers)
         table.setAlternatingRowColors(True)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -1447,7 +1451,8 @@ class PropellerMainWindow(QMainWindow):
         layout.addLayout(controls)
         splitter = QSplitter(Qt.Orientation.Vertical)
         self.model_table = self._table(["Model_ID", self.tr("original"), self.tr("manufacturer"), self.tr("size"),
-                                        self.tr("evidence"), self.tr("points"), self.tr("geometry")])
+                                        self.tr("evidence"), self.tr("points"), self.tr("geometry")],
+                                       "modelTable")
         self.model_table.itemSelectionChanged.connect(self._model_selected)
         splitter.addWidget(self.model_table)
         points = QWidget()
@@ -1461,7 +1466,8 @@ class PropellerMainWindow(QMainWindow):
         point_controls.addWidget(self.point_filter, 1)
         points_layout.addLayout(point_controls)
         self.point_table = self._table(["RPM", "J", "Ct", "Cp", "η", f"{self.tr('thrust_card')} N",
-                                        f"{self.tr('power_card')} W", self.tr("class"), self.tr("source_file")])
+                                        f"{self.tr('power_card')} W", self.tr("class"), self.tr("source_file")],
+                                       "pointTable")
         points_layout.addWidget(self.point_table)
         splitter.addWidget(points)
         splitter.setSizes([330, 240])
@@ -1695,7 +1701,8 @@ class PropellerMainWindow(QMainWindow):
         self.accessory_table = self._table([
             self.tr("module_included"), self.tr("module_type"), self.tr("module_model"),
             self.tr("module_quantity"), f"{self.tr('module_mass_each')}, {unit}",
-            f"{self.tr('module_mass_total')}, {unit}"])
+            f"{self.tr('module_mass_total')}, {unit}"],
+            "accessoryTable")
         self.accessory_table.setMinimumHeight(310)
         self.accessory_table.itemChanged.connect(self._accessory_item_changed)
         layout.addWidget(self.accessory_table, 1)
@@ -1791,7 +1798,8 @@ class PropellerMainWindow(QMainWindow):
         builds_group = QGroupBox(self.tr("saved_builds_list"))
         builds_layout = QVBoxLayout(builds_group)
         self.build_table = self._table(["ID", self.tr("name"), self.tr("model"), "KV", "S",
-                                        self.tr("module_count"), self.tr("module_mass"), self.tr("update")])
+                                        self.tr("module_count"), self.tr("module_mass"), self.tr("update")],
+                                       "buildTable")
         self.build_table.itemSelectionChanged.connect(self._select_build)
         builds_layout.addWidget(self.build_table)
         right_layout.addWidget(builds_group, 2)
@@ -1965,7 +1973,8 @@ class PropellerMainWindow(QMainWindow):
                                           self.tr("power_card"), self.tr("torque"), "ηsystem", "ηmax", "ηaero", "T/W",
                                           self.tr("time"), self.tr("recommended_voltage"), self.tr("rpm_margin"),
                                           "ESC", self.tr("motor_name"), self.tr("battery_name"), self.tr("confidence"),
-                                          self.tr("source"), self.tr("warnings")])
+                                          self.tr("source"), self.tr("warnings")],
+                                         "compareTable")
         layout.addWidget(self.compare_table)
         self._refresh_compare()
         return tab
@@ -2063,16 +2072,17 @@ class PropellerMainWindow(QMainWindow):
         geometry = self._combo("frame_geometry", [("X", "X"), ("H", "H"), ("+", "+"),
                                                    (("Довільна" if self.language == "uk" else "Custom"), "custom")])
         form.addRow(self.tr("frame_geometry"), geometry)
-        self._field(form, self.tr("frame_motors"), "frame_motors")
-        self._field(form, self.tr("arm_width"), "arm_width", unit_label("length_m", self.unit_system))
-        self._field(form, self.tr("arm_thickness"), "arm_thickness", unit_label("length_m", self.unit_system))
+        self._field(form, self.tr("frame_motors"), "frame_motors", "", "motors")
+        self._field(form, self.tr("arm_width"), "arm_width", unit_label("length_m", self.unit_system), "arm_width")
+        self._field(form, self.tr("arm_thickness"), "arm_thickness", unit_label("length_m", self.unit_system),
+                    "arm_thickness")
         materials = [("Вуглепластик" if self.language == "uk" else "Carbon fiber", "Carbon fiber"),
                      ("Алюміній" if self.language == "uk" else "Aluminum", "Aluminum"),
                      ("Деревина" if self.language == "uk" else "Wood", "Wood"),
                      ("Власний" if self.language == "uk" else "Custom", "Custom")]
         form.addRow(self.tr("frame_material"), self._combo("frame_material", materials))
-        self._field(form, self.tr("frame_mass"), "frame_mass", unit_label("mass_kg", self.unit_system))
-        self._field(form, self.tr("payload"), "payload", unit_label("mass_kg", self.unit_system))
+        self._field(form, self.tr("frame_mass"), "frame_mass", unit_label("mass_kg", self.unit_system), "frame_mass")
+        self._field(form, self.tr("payload"), "payload", unit_label("mass_kg", self.unit_system), "build_payload")
         calculate = QPushButton(self.tr("recommend"), objectName="primary")
         calculate.clicked.connect(self.calculate_frame)
         form.addRow(calculate)
@@ -2161,7 +2171,8 @@ class PropellerMainWindow(QMainWindow):
         info = QLabel(self.tr("open_calculation_info"))
         info.setWordWrap(True)
         layout.addWidget(info)
-        self.trace_table = self._table([self.tr("variable"), self.tr("formula"), self.tr("value"), self.tr("unit")])
+        self.trace_table = self._table([self.tr("variable"), self.tr("formula"), self.tr("value"), self.tr("unit")],
+                                      "traceTable")
         layout.addWidget(self.trace_table, 1)
         button = QPushButton(self.tr("recalculate"), objectName="primary")
         button.clicked.connect(self.calculate)

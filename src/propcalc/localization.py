@@ -536,6 +536,15 @@ FIELD_HELP: dict[str, tuple[str, str]] = {
     "frame_diagonal": (
         "Що: відстань між осями найдальших моторів, не зовнішній габарит рами.\nДе знайти: креслення або вимірювання центр–центр.\nЗбільшення: дозволяє більший пропелер, але збільшує прогин і масу.\nФормула для X/+: відстань сусідніх осей приблизно diagonal/√2.\nКритичність: висока.",
         "What: distance between the farthest motor axes, not the frame's outer dimension.\nWhere: drawing or center-to-center measurement.\nIncrease: allows a larger propeller but increases deflection and mass.\nFor X/+: adjacent-axis spacing is approximately diagonal/√2.\nCriticality: high."),
+    "arm_width": (
+        "Що: ширина променя рами в місці кріплення мотора.\nДе знайти: креслення або вимірювання штангенциркулем.\nЗбільшення: підвищує жорсткість і масу; зменшення знижує запас міцності.\nТипово: 10-60 мм.\nКритичність: середня.",
+        "What: frame arm width at the motor mount.\nWhere: drawing or caliper measurement.\nIncrease: raises stiffness and mass; decrease lowers the strength margin.\nTypical: 10-60 mm.\nCriticality: medium."),
+    "arm_thickness": (
+        "Що: товщина променя рами в місці кріплення мотора.\nДе знайти: креслення або вимірювання штангенциркулем.\nЗбільшення: підвищує жорсткість на згин і масу; зменшення збільшує прогин і вібрації.\nТипово: 3-12 мм.\nКритичність: середня.",
+        "What: frame arm thickness at the motor mount.\nWhere: drawing or caliper measurement.\nIncrease: raises bending stiffness and mass; decrease increases deflection and vibration.\nTypical: 3-12 mm.\nCriticality: medium."),
+    "frame_mass": (
+        "Що: маса самої рами без батареї, корисного навантаження та силової установки.\nДе знайти: зважити раму окремо.\nЗбільшення: зменшує T/W і запас тяги; входить у повну злітну масу.\nТипово: 0.1-5 кг.\nКритичність: висока.",
+        "What: bare frame mass excluding battery, payload and power system.\nWhere: weigh the frame separately.\nIncrease: lowers T/W and thrust margin; included in all-up mass.\nTypical: 0.1-5 kg.\nCriticality: high."),
 }
 
 

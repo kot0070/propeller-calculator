@@ -264,3 +264,62 @@ class QtCompareNaNRankingTests(unittest.TestCase):
             finally:
                 window.close()
                 app.processEvents()
+
+
+@requires_qt
+@requires_tiny_db
+class QtAccessibilityNamingTests(unittest.TestCase):
+    """Frame inputs and tables must carry programmatic names.
+
+    Regression: the 5 Frame-tab QLineEdits had no tip key (empty tooltip /
+    accessibleDescription) and all 8 QTables had empty accessibleName /
+    objectName, so assistive tools could not identify them.
+
+    Uses a tempfile copy of work/build/propellers.seed.db, never the
+    production database.
+    """
+
+    FRAME_TIP_KEYS = {
+        "frame_motors": "motors",
+        "arm_width": "arm_width",
+        "arm_thickness": "arm_thickness",
+        "frame_mass": "frame_mass",
+        "payload": "build_payload",
+    }
+
+    def test_frame_inputs_have_tips_and_tables_have_names(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication, QTableWidget
+
+        app = QApplication.instance() or QApplication([])
+        from propcalc.qt_app import PropellerMainWindow
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_copy = Path(tmp) / "propellers.seed.db"
+            shutil.copy2(TINY_SEED_DB, db_copy)
+            window = PropellerMainWindow(database_path=str(db_copy))
+            try:
+                app.processEvents()
+                window.tooltips_enabled = True
+                window._apply_tooltips()
+                app.processEvents()
+                for key, tip in self.FRAME_TIP_KEYS.items():
+                    with self.subTest(field=key):
+                        widget = window.edits[key]
+                        self.assertEqual(window.tip_keys.get(id(widget)), tip)
+                        self.assertTrue(widget.toolTip(), f"{key} tooltip empty")
+                        self.assertTrue(
+                            widget.accessibleDescription(),
+                            f"{key} accessibleDescription empty",
+                        )
+                tables = window.findChildren(QTableWidget)
+                self.assertEqual(len(tables), 8)
+                for table in tables:
+                    with self.subTest(table=table.objectName() or "<unnamed>"):
+                        self.assertTrue(table.accessibleName(), "table accessibleName empty")
+                        self.assertTrue(table.objectName(), "table objectName empty")
+                names = sorted(table.objectName() for table in tables)
+                self.assertEqual(len(set(names)), 8, f"objectNames not unique: {names}")
+            finally:
+                window.close()
+                app.processEvents()
