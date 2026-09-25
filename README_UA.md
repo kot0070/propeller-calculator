@@ -15,6 +15,7 @@ Workbook: 127 тестів — 58 PASS / 62 N/A (платформи поза с�
 EXE: `Propeller_Calculator_Professional_UA_v3_3.exe`.
 Звіт по агентах: \work/AGENT_PERFORMANCE_REPORT.md\ (сильні/слабкі сторони, рекомендації).
 Відомі залишки: CI workflow очікує token scope; занотовано живе прослуховування скрінрідера + переклади другого двійника; відкриті ручні смакові рядки (T043 CTA тощо).
+Вкладка «База даних»: відновлення в один клік (`restoreDatabase` → `restore_database`/`restore_database_from_path`) із закритою за замовчуванням перевіркою лише для читання (`validate_restore_candidate`: `PRAGMA quick_check`, обов'язкові таблиці, перевірка кількості моделей), резервною копією з міткою часу й атомарною заміною. Вкладки калькулятора (простий + інженерний) і порівняння: вбудовані PDF-звіти (`exportCalcPdf` → `export_calc_pdf_report`, `exportComparePdf` → `export_compare_pdf_report`) через Qt `QTextDocument`/`QPdfWriter` — вхідні дані, результати, джерело проти математики, попередження, версія програми.
 
 ## Готова програма
 

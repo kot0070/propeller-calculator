@@ -15,6 +15,7 @@ Production DB: 1053 models / 335434 points.
 EXE: `Propeller_Calculator_Professional_UA_v3_3.exe`.
 Agent report: \work/AGENT_PERFORMANCE_REPORT.md\ (strengths, weaknesses, recommendations).
 Known residuals: CI workflow pending token scope; screen-reader live hearing + second-twin translations noted; manual taste rows (T043 CTA etc.) open.
+Database tab: one-click restore (`restoreDatabase` → `restore_database`/`restore_database_from_path`) with fail-closed read-only validation (`validate_restore_candidate`: `PRAGMA quick_check`, required tables, model-count check), timestamped safety backup, and atomic replace. Calculator (simple + engineering) and comparison tabs: in-app PDF reports (`exportCalcPdf` → `export_calc_pdf_report`, `exportComparePdf` → `export_compare_pdf_report`) via Qt `QTextDocument`/`QPdfWriter`, covering inputs, results, source-vs-math, warnings, and app version.
 
 ## Ready application
 
