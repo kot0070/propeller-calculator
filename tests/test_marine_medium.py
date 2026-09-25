@@ -69,6 +69,7 @@ class MarineMediumIngestTest(unittest.TestCase):
         fixture = tmp_dir / Path(relative).name
         fixture.write_text(_per3_fixture(underwater=underwater), encoding="utf-8")
         session, connection = _make_session()
+        self.addCleanup(connection.close)
         _add_file(session, connection, relative, fixture)
         if preseed_air_model:
             # Simulate the catalog ingest running first with medium='air'.
