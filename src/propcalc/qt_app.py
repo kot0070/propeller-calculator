@@ -3,12 +3,18 @@ from __future__ import annotations
 import json
 import math
 import os
+import shutil
+import sqlite3
 import sys
+import time
+import uuid
+from datetime import datetime
+from html import escape as _html_escape
 from pathlib import Path
 from typing import Any, Callable
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSignalBlocker, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPdfWriter, QPen, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QBoxLayout, QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QGridLayout,
     QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
@@ -270,9 +276,54 @@ class CalcInputErrors(ValueError):
         self.field_errors = field_errors
 
 
+RESTORE_REQUIRED_TABLES = ("models", "performance_points", "sources")
+
+
+def validate_restore_candidate(path: str | Path) -> tuple[bool, str]:
+    """Fail-closed validation for a database file picked for restore.
+
+    Opens the candidate read-only and checks ``PRAGMA quick_check``,
+    the required tables and a basic model-count sanity check.
+    Returns ``(ok, message)``; never raises and never touches the
+    working database.
+    """
+    candidate = Path(path)
+    if not candidate.is_file():
+        return False, f"File does not exist: {candidate}"
+    connection: sqlite3.Connection | None = None
+    try:
+        connection = sqlite3.connect(f"file:{candidate.as_posix()}?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+        quick_rows = connection.execute("PRAGMA quick_check").fetchall()
+        quick_values = [str(row[0]) for row in quick_rows]
+        if not (len(quick_values) == 1 and quick_values[0].strip().lower() == "ok"):
+            detail = "; ".join(quick_values)[:300] or "empty quick_check"
+            return False, f"Integrity check failed: {detail}"
+        available = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        missing = [name for name in RESTORE_REQUIRED_TABLES if name not in available]
+        if missing:
+            return False, f"Required tables missing: {', '.join(missing)}"
+        model_count = connection.execute("SELECT COUNT(*) FROM models").fetchone()[0]
+        try:
+            model_count = int(model_count)
+        except (TypeError, ValueError):
+            return False, "Model count sanity check failed"
+        if model_count <= 0:
+            return False, "Database contains no propeller models"
+        return True, f"OK: {model_count} models"
+    except Exception as exc:  # noqa: BLE001 - validation must never raise
+        return False, f"{type(exc).__name__}: {exc}"
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:  # noqa: BLE001 - best effort
+                pass
+
+
 class PropellerMark(QWidget):
     """Small vector propeller/motor mark; scales cleanly at 100–200% DPI."""
-
     def __init__(self) -> None:
         super().__init__()
         self.setFixedSize(58, 58)
@@ -1004,8 +1055,14 @@ class PropellerMainWindow(QMainWindow):
         calculate.clicked.connect(self.calculate)
         add = QPushButton(self.tr("add_compare"))
         add.clicked.connect(self.add_current_to_compare)
+        pdf = QPushButton(
+            "Експорт PDF-звіту" if self.language == "uk" else "Export PDF report")
+        pdf.setObjectName("exportCalcPdf")
+        pdf.setAccessibleName("exportCalcPdf")
+        pdf.clicked.connect(self.export_calc_pdf_report)
         actions.addWidget(calculate, 2)
         actions.addWidget(add, 1)
+        actions.addWidget(pdf, 1)
         left_layout.addLayout(actions)
         left_layout.addWidget(self._context_help_group())
         left_layout.addStretch(1)
@@ -1061,8 +1118,14 @@ class PropellerMainWindow(QMainWindow):
         calculate.clicked.connect(self.calculate)
         add = QPushButton(self.tr("add_compare"))
         add.clicked.connect(self.add_current_to_compare)
+        pdf = QPushButton(
+            "Експорт PDF-звіту" if self.language == "uk" else "Export PDF report")
+        pdf.setObjectName("exportCalcPdf")
+        pdf.setAccessibleName("exportCalcPdf")
+        pdf.clicked.connect(self.export_calc_pdf_report)
         actions.addWidget(calculate, 2)
         actions.addWidget(add, 1)
+        actions.addWidget(pdf, 1)
         left_layout.addLayout(actions)
         left_layout.addWidget(self._context_help_group())
         left_layout.addStretch(1)
@@ -1583,6 +1646,12 @@ class PropellerMainWindow(QMainWindow):
         exp = QPushButton(self.tr("export"))
         exp.clicked.connect(self.export_db)
         controls.addWidget(exp)
+        res = QPushButton(
+            "Відновити базу даних…" if self.language == "uk" else "Restore database…")
+        res.setObjectName("restoreDatabase")
+        res.setAccessibleName("restoreDatabase")
+        res.clicked.connect(self.restore_database)
+        controls.addWidget(res)
         layout.addLayout(controls)
         splitter = QSplitter(Qt.Orientation.Vertical)
         self.model_table = self._table(["Model_ID", self.tr("original"), self.tr("manufacturer"), self.tr("size"),
@@ -1672,6 +1741,312 @@ class PropellerMainWindow(QMainWindow):
         if target:
             export_database(self.repository.connection, Path(target))
             QMessageBox.information(self, APP_NAME, f"{self.tr('exported')}:\n{target}")
+
+    def _remove_sidecar_journals(self) -> None:
+        for suffix in (".db-wal", ".db-shm", "-wal", "-shm"):
+            sidecar = self.database_path.parent / (self.database_path.name + suffix)
+            try:
+                if sidecar.exists():
+                    sidecar.unlink()
+            except OSError:
+                pass
+
+    def _safety_backup_before_restore(self) -> Path:
+        """Timestamped safety copy of the working DB (restore counterpart of import backup)."""
+        backups = self.paths["backups"]
+        backups.mkdir(parents=True, exist_ok=True)
+        target = backups / (
+            f"propellers-before-restore-{time.strftime('%Y%m%d-%H%M%S')}-"
+            f"{time.time_ns() % 1_000_000_000:09d}-{uuid.uuid4().hex[:8]}.db")
+        destination = sqlite3.connect(target)
+        try:
+            self.repository.connection.backup(destination)
+        finally:
+            destination.close()
+        return target
+
+    def restore_database_from_path(self, source: str | Path) -> Path:
+        """Validate, back up, atomically replace and reopen the working database.
+
+        Raises on any failure; the original working database is left intact
+        (fail closed). Returns the safety-backup path on success.
+        """
+        candidate = Path(source)
+        ok, message = validate_restore_candidate(candidate)
+        if not ok:
+            raise ValueError(message)
+        if candidate.resolve() == self.database_path.resolve():
+            raise ValueError("The selected database is already the active working database")
+        backup = self._safety_backup_before_restore()
+        try:
+            self.repository.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:  # noqa: BLE001 - best effort before close
+            pass
+        self.repository.close()
+        try:
+            self._remove_sidecar_journals()
+            staging = self.database_path.with_suffix(".db.restoring")
+            shutil.copy2(candidate, staging)
+            os.replace(staging, self.database_path)
+            self._remove_sidecar_journals()
+        except Exception:
+            self.repository = Repository(self.database_path)
+            self.calculator = PropellerCalculator(self.repository)
+            self.repository.clear_caches()
+            raise
+        self.repository = Repository(self.database_path)
+        self.calculator = PropellerCalculator(self.repository)
+        self.repository.clear_caches()
+        return backup
+
+    def restore_database(self) -> None:
+        source, _ = QFileDialog.getOpenFileName(
+            self,
+            "Відновити базу даних…" if self.language == "uk" else "Restore database…",
+            "", "SQLite (*.db)")
+        if not source:
+            return
+        try:
+            backup = self.restore_database_from_path(source)
+        except Exception as exc:  # noqa: BLE001 - user-facing slot
+            QMessageBox.critical(
+                self, APP_NAME,
+                ("Відновлення не виконано" if self.language == "uk" else "Restore failed")
+                + f":\n{self.tr('details')}: {exc}")
+            return
+        self._snapshot()
+        self._build_ui()
+        QMessageBox.information(
+            self, APP_NAME,
+            ("Базу даних відновлено" if self.language == "uk" else "Database restored")
+            + f":\n{source}\n"
+            + ("Резервна копія" if self.language == "uk" else "Safety backup")
+            + f":\n{backup}")
+
+    @staticmethod
+    def _report_number(value: Any, digits: int = 2) -> str:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return "n/a"
+        if math.isnan(numeric) or math.isinf(numeric):
+            return "n/a"
+        return f"{numeric:,.{digits}f}"
+
+    def _report_header_html(self, title: str) -> str:
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return (
+            f"<h1>{_html_escape(APP_NAME)}</h1>"
+            f"<p><b>{_html_escape(title)}</b><br>"
+            f"Version: {_html_escape(APP_VERSION)} · Author: {_html_escape(AUTHOR)}<br>"
+            f"Generated: {_html_escape(stamp)}</p>"
+        )
+
+    def _build_calc_report_html(self) -> str:
+        inputs = self.current_inputs
+        result = self.current_result
+        parts = [self._report_header_html(
+            "Звіт розрахунку" if self.language == "uk" else "Calculation report")]
+        if inputs is None or result is None:
+            parts.append("<p><b>" + _html_escape(
+                "Немає дійсного розрахунку; перевірте вхідні дані."
+                if self.language == "uk" else
+                "No valid calculation available; check the inputs.") + "</b></p>")
+            parts.append("<p>Model: " + _html_escape(
+                str(self.selected_model_id or "—")) + "</p>")
+            return ("<html><body>" + "".join(parts) + "</body></html>")
+        point = result.point
+        rows = [
+            ("Model", str(inputs.model_id)),
+            ("Voltage (V)", self._report_number(inputs.voltage_v)),
+            ("Throttle (%)", self._report_number(inputs.throttle * 100.0, 1)),
+            ("Motor KV (RPM/V)", self._report_number(inputs.motor_kv, 1)),
+            ("Speed (m/s)", self._report_number(inputs.speed_m_s, 3)),
+            ("Mass (kg)", self._report_number(inputs.mass_kg, 3)),
+            ("Motors", str(inputs.motor_count)),
+            ("ESC limit (A)", self._report_number(inputs.esc_current_a, 1)),
+            ("Battery", f"{_html_escape(str(inputs.battery_type))} "
+                        f"{inputs.battery_s}S / {self._report_number(inputs.battery_capacity_ah)} Ah / "
+                        f"{self._report_number(inputs.battery_c_rating, 0)}C"),
+            ("Medium / density", f"{_html_escape(str(inputs.medium))} / "
+                                 f"{self._report_number(inputs.density_kg_m3, 3)} kg/m³"),
+        ]
+        parts.append("<h2>" + _html_escape("Вхідні дані" if self.language == "uk" else "Inputs") + "</h2>")
+        parts.append("<table border='1' cellspacing='0' cellpadding='4'>")
+        for name, value in rows:
+            parts.append(f"<tr><td>{_html_escape(name)}</td><td>{value}</td></tr>")
+        parts.append("</table>")
+        motor_margin = (result.motor_current_margin_percent
+                        if result.motor_current_margin_percent is not None
+                        else result.motor_power_margin_percent)
+        cards = [
+            ("Total thrust (N)", self._report_number(result.total_thrust_n)),
+            ("Total current (A)", self._report_number(point.current_a * inputs.motor_count, 1)),
+            ("Total electrical power (W)",
+             self._report_number(point.electrical_power_w * inputs.motor_count, 1)),
+            ("RPM", self._report_number(point.rpm, 0)),
+            ("T/W", self._report_number(result.thrust_to_weight)),
+            ("Runtime (min)", self._report_number(result.runtime_min, 1)),
+            ("ESC margin (%)", self._report_number(result.esc_margin_percent, 0)),
+            ("Motor margin (%)",
+             "n/a" if motor_margin is None else self._report_number(motor_margin, 0)),
+            ("Battery margin (%)", self._report_number(result.battery_margin_percent, 0)),
+            ("Structural RPM",
+             "n/a" if result.structural_rpm is None else self._report_number(result.structural_rpm, 0)),
+            ("Confidence (%)", self._report_number(point.confidence * 100.0, 0)),
+            ("Evidence", f"{_html_escape(str(point.evidence))} · {_html_escape(str(point.source_type))}"),
+        ]
+        parts.append("<h2>" + _html_escape("Результати" if self.language == "uk" else "Results") + "</h2>")
+        parts.append("<table border='1' cellspacing='0' cellpadding='4'>")
+        for name, value in cards:
+            parts.append(f"<tr><td>{_html_escape(name)}</td><td>{value}</td></tr>")
+        parts.append("</table>")
+        try:
+            raw = self.repository.nearest_raw_point(
+                inputs.model_id, point.rpm, point.j, point.evidence)
+        except Exception:  # noqa: BLE001 - report must not crash
+            raw = None
+        parts.append("<h2>" + _html_escape(
+            "Джерело проти математики" if self.language == "uk" else "Source vs math") + "</h2>")
+        parts.append("<table border='1' cellspacing='0' cellpadding='4'>"
+                     "<tr><th>Method</th><th>RPM</th><th>J</th><th>Ct</th><th>Cp</th><th>Source</th></tr>")
+        if raw is None:
+            parts.append("<tr><td>Source row</td><td colspan='5'>n/a</td></tr>")
+        else:
+            try:
+                source = f"{raw['relative_path']}:{raw['source_row'] or '-'}"
+            except Exception:  # noqa: BLE001 - row shape varies
+                source = "n/a"
+            parts.append(
+                "<tr><td>Source row</td>"
+                f"<td>{self._report_number(raw['rpm'], 0)}</td>"
+                f"<td>{self._report_number(raw['advance_ratio_j'], 3)}</td>"
+                f"<td>{self._report_number(raw['ct'])}</td>"
+                f"<td>{self._report_number(raw['cp'])}</td>"
+                f"<td>{_html_escape(str(source))}</td></tr>")
+        parts.append(
+            "<tr><td>Math result</td>"
+            f"<td>{self._report_number(point.rpm, 0)}</td>"
+            f"<td>{self._report_number(point.j, 3)}</td>"
+            f"<td>{self._report_number(point.ct)}</td>"
+            f"<td>{self._report_number(point.cp)}</td>"
+            "<td>Ct/Cp interpolation + equations</td></tr>")
+        parts.append("</table>")
+        warnings = [self._localize_warning(item) for item in result.warnings] or [self.tr("no_warnings")]
+        if result.missing_parameters:
+            warnings = [self.tr("simplified")] + warnings
+        parts.append("<h2>" + _html_escape("Попередження" if self.language == "uk" else "Warnings") + "</h2>")
+        parts.append("<ul>")
+        for warning in warnings:
+            parts.append(f"<li>{_html_escape(str(warning))}</li>")
+        parts.append("</ul>")
+        return "<html><body>" + "".join(parts) + "</body></html>"
+
+    def _build_compare_report_html(self) -> str:
+        parts = [self._report_header_html(
+            "Звіт порівняння" if self.language == "uk" else "Comparison report")]
+        if not self.compare_items:
+            parts.append("<p><b>" + _html_escape(
+                "Список порівняння порожній." if self.language == "uk" else
+                "The comparison list is empty.") + "</b></p>")
+            return "<html><body>" + "".join(parts) + "</body></html>"
+        headers = ["#", "Name", "Thrust N", "Current A", "Power W", "T/W",
+                   "Runtime min", "ESC %", "Motor %", "Battery %", "Confidence %", "Source"]
+        parts.append(f"<p>{_html_escape(str(len(self.compare_items)))} "
+                     + _html_escape("варіантів" if self.language == "uk" else "entries") + "</p>")
+        parts.append("<table border='1' cellspacing='0' cellpadding='4'><tr>")
+        for header in headers:
+            parts.append(f"<th>{_html_escape(header)}</th>")
+        parts.append("</tr>")
+        for index, item in enumerate(self.compare_items, 1):
+            try:
+                cells = [
+                    str(index), str(item.get("label", "")),
+                    self._report_number(item.get("thrust")),
+                    self._report_number(item.get("current")),
+                    self._report_number(item.get("power"), 1),
+                    self._report_number(item.get("tw")),
+                    self._report_number(item.get("runtime"), 1),
+                    self._report_number(item.get("esc_margin"), 0),
+                    ("n/a" if item.get("motor_margin") is None
+                     else self._report_number(item.get("motor_margin"), 0)),
+                    self._report_number(item.get("battery_margin"), 0),
+                    self._report_number(float(item.get("confidence", 0)) * 100.0, 0),
+                    str(item.get("source", "")),
+                ]
+            except Exception:  # noqa: BLE001 - one bad row must not kill the report
+                cells = [str(index)] + ["n/a"] * (len(headers) - 1)
+            parts.append("<tr>" + "".join(
+                f"<td>{_html_escape(cell)}</td>" for cell in cells) + "</tr>")
+        parts.append("</table>")
+        return "<html><body>" + "".join(parts) + "</body></html>"
+
+    def _write_pdf_report(self, html: str, target: str | Path) -> Path:
+        """Render HTML to PDF atomically (temp file + rename, no partial output)."""
+        destination = Path(target)
+        if not destination.suffix.lower() == ".pdf":
+            destination = destination.with_suffix(".pdf")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        staging = destination.parent / (destination.name + ".writing")
+        try:
+            document = QTextDocument()
+            document.setHtml(html)
+            writer = QPdfWriter(str(staging))
+            writer.setTitle(f"{APP_NAME} {APP_VERSION}")
+            writer.setCreator(APP_NAME)
+            document.print_(writer)
+            del writer
+            del document
+            if not staging.is_file() or staging.stat().st_size == 0:
+                raise RuntimeError("PDF writer produced no output")
+            os.replace(staging, destination)
+        finally:
+            try:
+                if staging.exists():
+                    staging.unlink()
+            except OSError:
+                pass
+        return destination
+
+    def _export_pdf_report(self, html: str, default_name: str) -> None:
+        target, _ = QFileDialog.getSaveFileName(
+            self,
+            "Експорт PDF-звіту" if self.language == "uk" else "Export PDF report",
+            default_name, "PDF (*.pdf)")
+        if not target:
+            return
+        try:
+            written = self._write_pdf_report(html, target)
+        except Exception as exc:  # noqa: BLE001 - user-facing slot
+            QMessageBox.critical(
+                self, APP_NAME,
+                ("Експорт PDF не виконано" if self.language == "uk" else "PDF export failed")
+                + f":\n{self.tr('details')}: {exc}")
+            return
+        QMessageBox.information(
+            self, APP_NAME, f"{self.tr('exported')}:\n{written}")
+
+    def export_calc_pdf_report(self) -> None:
+        try:
+            html = self._build_calc_report_html()
+        except Exception as exc:  # noqa: BLE001 - invalid input state must not crash
+            QMessageBox.critical(
+                self, APP_NAME,
+                ("Експорт PDF не виконано" if self.language == "uk" else "PDF export failed")
+                + f":\n{self.tr('details')}: {exc}")
+            return
+        self._export_pdf_report(html, "calculation-report.pdf")
+
+    def export_compare_pdf_report(self) -> None:
+        try:
+            html = self._build_compare_report_html()
+        except Exception as exc:  # noqa: BLE001 - invalid state must not crash
+            QMessageBox.critical(
+                self, APP_NAME,
+                ("Експорт PDF не виконано" if self.language == "uk" else "PDF export failed")
+                + f":\n{self.tr('details')}: {exc}")
+            return
+        self._export_pdf_report(html, "comparison-report.pdf")
 
     def _payload(self) -> dict[str, Any]:
         self._snapshot_accessories()
@@ -2118,6 +2493,12 @@ class PropellerMainWindow(QMainWindow):
         clear = QPushButton(self.tr("clear"))
         clear.clicked.connect(lambda: (self.compare_items.clear(), self._refresh_compare()))
         controls.addWidget(clear)
+        pdf = QPushButton(
+            "Експорт PDF-звіту" if self.language == "uk" else "Export PDF report")
+        pdf.setObjectName("exportComparePdf")
+        pdf.setAccessibleName("exportComparePdf")
+        pdf.clicked.connect(self.export_compare_pdf_report)
+        controls.addWidget(pdf)
         controls.addStretch(1)
         layout.addLayout(controls)
         self.compare_table = self._table(["#", self.tr("name"), self.tr("thrust_card"), self.tr("current_card"),
