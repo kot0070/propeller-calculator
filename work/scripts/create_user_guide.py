@@ -230,7 +230,7 @@ p("UIUC <b>images/pspbrwse.jbf</b>, SHA-256 045138E4253ACA536BB75BBC818F1EB45300
 p("Повні SHA-256 усіх семи джерел, 4,760 рядків журналу файлів, 2,031 відповідність сирої назви→Model_ID, діапазони RPM/J, причини пропусків і ручні звірки містяться у фінальному XLSX-аудиті.")
 
 p("10. Перевірки перед передачею", "H1x")
-checks = ["Python automated suite: 41 unit tests + 14-block UI functional test, all PASS", "SQLite quick_check = ok; foreign_key_check = 0", "Дублікати Model_ID і performance point_key = 0",
+checks = ["Python automated suite: 78 unit tests + 14-block UI functional test, all PASS", "SQLite quick_check = ok; foreign_key_check = 0", "Дублікати Model_ID і performance point_key = 0",
           "Повторний імпорт: кількість точок не зростає", "Змінена точка оновлюється; нова додається",
           "Збережена збірка та повний склад accessory rows переживають перезапуск", "SI→Imperial→SI зберігає фізичну тягу",
           "Статичний, динамічний, повітряний і водний режими виконуються",
