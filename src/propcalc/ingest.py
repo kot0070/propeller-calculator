@@ -25,6 +25,7 @@ from .normalization import (
 
 
 AIR_DENSITY = 1.225
+WATER_DENSITY = 1000.0
 LBF_N = 4.4482216152605
 HP_W = 745.6998715822702
 IN_LBF_NM = 0.1129848290276167
@@ -157,6 +158,58 @@ def float_or_none(value: Any) -> float | None:
 
 def xml_local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
+
+
+# UIUC volume-2 micro-prop designations are millimetres (the spec page prints
+# them with an explicit "mm" suffix, e.g. "140 mm X 45 mm"), while some
+# UIUC volume-3 Aeronaut filenames drop the decimal point of half-inch sizes
+# (spec "12.5 x 7.5" is filed as "125x75"). normalize_uiuc() in
+# normalization.py treats every designation as inches, so the affected
+# designations are corrected here at the ingest boundary. Reference
+# (read-only):
+#   work/extracted/UIUC-propDB/UIUC-propDB/volume-2/propDB-volume-2.html
+#   work/extracted/UIUC-propDB/UIUC-propDB/volume-3/propDB-volume-3.html
+_UIUC_MM_DESIGNATIONS: dict[str, tuple[float, float]] = {
+    # filename designation key -> (diameter_mm, pitch_mm)
+    "140x45": (140.0, 45.0),  # vp  (Vapor):      spec "140 mm X 45 mm"
+    "100x80": (100.0, 80.0),  # pl  (Plantraco):  spec "100 mm X 80 mm"
+    "96x70": (96.0, 70.0),  # kpf (KP folding): spec "96 mm X 70 mm"
+    "130x70": (130.0, 70.0),  # ef  (E-Flite):    spec "130 mm X 70 mm"
+    "57x20": (57.0, 20.0),  # pl  (Plantraco):  spec "57 mm X 20mm"
+}
+
+_UIUC_DOTTED_INCH_DESIGNATIONS: dict[str, tuple[float, float]] = {
+    # filename designation key -> (diameter_in, pitch_in); the spec page
+    # prints these with a decimal point but the data files drop it.
+    "125x75": (12.5, 7.5),  # ancf (Aeronaut): spec "12.5 x 7.5"
+    "125x9": (12.5, 9.0),  # ancf (Aeronaut): spec "12.5 x 9"
+    "125x6": (12.5, 6.0),  # ancf (Aeronaut): spec "12.5 x 6"
+    "12x65": (12.0, 6.5),  # ancf (Aeronaut): spec "12 x 6.5"
+    "13x65": (13.0, 6.5),  # ancf (Aeronaut): spec "13 x 6.5"
+}
+
+
+def resolve_uiuc_model(raw_name: str) -> NormalizedModel:
+    """Resolve a UIUC raw model name to dimensions, correcting the two
+    filename conventions normalize_uiuc() misreads as inches."""
+    model = normalize_uiuc(raw_name)
+    match = re.search(r"(?i)(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)", raw_name)
+    if not match:
+        return model
+    key = f"{match.group(1)}x{match.group(2)}".lower()
+    if key in _UIUC_MM_DESIGNATIONS:
+        diameter_mm, pitch_mm = _UIUC_MM_DESIGNATIONS[key]
+        return NormalizedModel(
+            **{**asdict(model), "diameter_m": diameter_mm / 1000.0, "pitch_m": pitch_mm / 1000.0,
+               "rule": model.rule + "; UIUC mm designation corrected at ingest (spec labels carry explicit mm)"}
+        )
+    if key in _UIUC_DOTTED_INCH_DESIGNATIONS:
+        diameter_in, pitch_in = _UIUC_DOTTED_INCH_DESIGNATIONS[key]
+        return NormalizedModel(
+            **{**asdict(model), "diameter_m": diameter_in * INCH_M, "pitch_m": pitch_in * INCH_M,
+               "rule": model.rule + "; UIUC dropped-decimal inch designation corrected at ingest (spec prints decimal point)"}
+        )
+    return model
 
 
 def column_index(reference: str) -> int:
@@ -511,7 +564,7 @@ class IngestSession:
                                      raw_lines=len(lines), reason="TXT header does not match UIUC performance or geometry schema")
                 continue
             raw_model = self.uiuc_raw_model(path, category)
-            model = normalize_uiuc(raw_model)
+            model = resolve_uiuc_model(raw_model)
             if category in {"geometry", "thickness_geometry"}:
                 self.ensure_model(model, has_geometry=True)
                 self.map_model(code, model)
@@ -629,9 +682,16 @@ class IngestSession:
                                  category=category, parser="apc-dat-classifier", raw_lines=len(lines), reason=reason)
                 continue
             raw_name = name_match.group(1)
-            medium = "water" if "PERFILES2-MARINE" in relative.upper() else "air"
+            is_marine = "PERFILES2-MARINE" in relative.upper() or "(UNDERWATER)" in text.upper()
+            medium = "water" if is_marine else "air"
+            density = WATER_DENSITY if is_marine else AIR_DENSITY
             model = self.resolve_apc_prediction_model(raw_name, medium)
             self.ensure_model(model, has_prediction=True)
+            if is_marine:
+                # ensure_model keeps the first-seen (catalog 'air') medium, so
+                # marine predictions must explicitly win for underwater models.
+                self.connection.execute(
+                    "UPDATE models SET medium='water' WHERE model_id=? AND medium!='water'", (model.model_id,))
             self.map_model(code, model)
             current_rpm: float | None = None
             parsed = 0
@@ -653,7 +713,7 @@ class IngestSession:
                 speed_mph, j, efficiency, ct, cp, _hp, _torque_imperial, _thrust_imperial, power_w, torque_nm, thrust_n = nums[:11]
                 values = {"rpm": current_rpm, "j": j, "speed_m_s": speed_mph * 0.44704, "ct": ct, "cp": cp,
                           "efficiency": efficiency, "thrust_n": thrust_n, "power_w": power_w, "torque_nm": torque_nm,
-                          "density": AIR_DENSITY, "is_static": abs(j or 0.0) < 1e-12}
+                          "density": density, "is_static": abs(j or 0.0) < 1e-12}
                 self.upsert_performance(code, relative, model, source_row, values, line, "prediction",
                                         "APC manufacturer numerical prediction")
                 parsed += 1

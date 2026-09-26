@@ -196,9 +196,17 @@ UI_TEXT: dict[str, dict[str, str]] = {
         "offline_subtitle": "ЛАБОРАТОРІЯ СИЛОВИХ УСТАНОВОК - ОФЛАЙН-БАЗА",
         "ready_status": "ГОТОВО",
         "calculation_error": "Помилка розрахунку",
+        "details": "Деталі",
         "delete_confirm": "Видалити вибрану збірку?",
         "import_failed": "Імпорт не виконано",
         "exported": "Експортовано",
+        "busy_working": "Виконується операція…",
+        "confirm_restore": "Замінити робочу базу даних?",
+        "confirm_restore_info": "Джерело:\n{source}\n\nЦіль:\n{target}\n\nПеред заміною буде створено резервну копію у:\n{backups}\n\nПродовжити?",
+        "confirm_import": "Імпортувати та об'єднати дані?",
+        "confirm_import_info": "Файл:\n{source}\n\nПеред злиттям буде створено автоматичну резервну копію. Продовжити?",
+        "confirm_update": "Перезаписати збережену збірку поточними значеннями? Продовжити?",
+        "confirm_close": "Картка збірки має незбережені зміни. Закрити без збереження?",
         "simple_summary": "Підказка: для польоту перевірте T/W, струм, час роботи та всі червоні попередження. Інженерний режим показує ліміти й повні криві.",
         "source_vs_math": "ДАНІ ДЖЕРЕЛА ТА МАТЕМАТИЧНИЙ РЕЗУЛЬТАТ",
         "source_math_note": "У режимі «Відтворити випробування з бази» обидва рядки використовують однакові RPM та J: перший показує значення початкового файла, другий незалежно перевіряє їх за Ct/Cp і формулами. У режимі «Власні параметри» перший рядок є найближчою базовою характеристикою для порівняння. Тяга та механічна потужність тут завжди для одного пропелера/мотора.",
@@ -223,6 +231,10 @@ UI_TEXT: dict[str, dict[str, str]] = {
         "example_1": "Приклад 1 — дані бази",
         "example_2": "Приклад 2 — власна збірка",
         "load_example": "ЗАВАНТАЖИТИ ПРИКЛАД У КАЛЬКУЛЯТОР",
+        "empty_calculator": "Модель не вибрано — виберіть модель, щоб почати. Для перевірки даних бази використовуйте режим «Відтворити випробування з бази», для власного апарата — «Власні параметри».",
+        "empty_database": "Записів немає — натисніть «Імпортувати» або «Відновити базу даних».",
+        "empty_builds": "Збірок немає — виконайте розрахунок і натисніть «Зберегти збірку».",
+        "empty_compare": "Порівняння порожнє — натисніть «Додати до порівняння».",
     },
     "en": {
         "calculator": "Calculator",
@@ -418,9 +430,17 @@ UI_TEXT: dict[str, dict[str, str]] = {
         "offline_subtitle": "PROPULSION SYSTEMS LAB - OFFLINE DATABASE",
         "ready_status": "READY",
         "calculation_error": "Calculation error",
+        "details": "Details",
         "delete_confirm": "Delete the selected build?",
         "import_failed": "Import failed",
         "exported": "Exported",
+        "busy_working": "Working…",
+        "confirm_restore": "Replace the working database?",
+        "confirm_restore_info": "Source:\n{source}\n\nTarget:\n{target}\n\nA safety backup will be created in:\n{backups}\n\nContinue?",
+        "confirm_import": "Import and merge data?",
+        "confirm_import_info": "File:\n{source}\n\nAn automatic backup will be created before merging. Continue?",
+        "confirm_update": "Overwrite the saved build with the current values? Continue?",
+        "confirm_close": "The build card has unsaved changes. Close without saving?",
         "simple_summary": "Tip: for flight, verify T/W, current, runtime and every red warning. Engineering mode shows the limits and full curves.",
         "source_vs_math": "SOURCE DATA AND MATHEMATICAL RESULT",
         "source_math_note": "In “Reproduce a database test” mode both rows use identical RPM and J: the first shows the original-file values and the second independently checks them from Ct/Cp and the equations. With “Custom inputs”, the first row is the nearest database characteristic for comparison. Thrust and shaft power here are always per propeller/motor.",
@@ -445,6 +465,10 @@ UI_TEXT: dict[str, dict[str, str]] = {
         "example_1": "Example 1 — database data",
         "example_2": "Example 2 — custom build",
         "load_example": "LOAD EXAMPLE INTO CALCULATOR",
+        "empty_calculator": "No model selected — select a model to begin. Use “Reproduce a database test” to verify database data, or “Custom inputs” for your own aircraft.",
+        "empty_database": "No records — use Import or Restore database.",
+        "empty_builds": "No builds — calculate, then Save build.",
+        "empty_compare": "Comparison is empty — Add current calculation.",
     },
 }
 
@@ -534,6 +558,15 @@ FIELD_HELP: dict[str, tuple[str, str]] = {
     "frame_diagonal": (
         "Що: відстань між осями найдальших моторів, не зовнішній габарит рами.\nДе знайти: креслення або вимірювання центр–центр.\nЗбільшення: дозволяє більший пропелер, але збільшує прогин і масу.\nФормула для X/+: відстань сусідніх осей приблизно diagonal/√2.\nКритичність: висока.",
         "What: distance between the farthest motor axes, not the frame's outer dimension.\nWhere: drawing or center-to-center measurement.\nIncrease: allows a larger propeller but increases deflection and mass.\nFor X/+: adjacent-axis spacing is approximately diagonal/√2.\nCriticality: high."),
+    "arm_width": (
+        "Що: ширина променя рами в місці кріплення мотора.\nДе знайти: креслення або вимірювання штангенциркулем.\nЗбільшення: підвищує жорсткість і масу; зменшення знижує запас міцності.\nТипово: 10-60 мм.\nКритичність: середня.",
+        "What: frame arm width at the motor mount.\nWhere: drawing or caliper measurement.\nIncrease: raises stiffness and mass; decrease lowers the strength margin.\nTypical: 10-60 mm.\nCriticality: medium."),
+    "arm_thickness": (
+        "Що: товщина променя рами в місці кріплення мотора.\nДе знайти: креслення або вимірювання штангенциркулем.\nЗбільшення: підвищує жорсткість на згин і масу; зменшення збільшує прогин і вібрації.\nТипово: 3-12 мм.\nКритичність: середня.",
+        "What: frame arm thickness at the motor mount.\nWhere: drawing or caliper measurement.\nIncrease: raises bending stiffness and mass; decrease increases deflection and vibration.\nTypical: 3-12 mm.\nCriticality: medium."),
+    "frame_mass": (
+        "Що: маса самої рами без батареї, корисного навантаження та силової установки.\nДе знайти: зважити раму окремо.\nЗбільшення: зменшує T/W і запас тяги; входить у повну злітну масу.\nТипово: 0.1-5 кг.\nКритичність: висока.",
+        "What: bare frame mass excluding battery, payload and power system.\nWhere: weigh the frame separately.\nIncrease: lowers T/W and thrust margin; included in all-up mass.\nTypical: 0.1-5 kg.\nCriticality: high."),
 }
 
 

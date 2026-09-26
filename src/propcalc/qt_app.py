@@ -1,14 +1,21 @@
+# Copyright (c) 2026 Ivan Soprun. All rights reserved.
 from __future__ import annotations
 
 import json
 import math
 import os
+import shutil
+import sqlite3
 import sys
+import time
+import uuid
+from datetime import datetime
+from html import escape as _html_escape
 from pathlib import Path
 from typing import Any, Callable
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSignalBlocker, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPdfWriter, QPen, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QBoxLayout, QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QGridLayout,
     QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
@@ -16,7 +23,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QTableWidget, QTableWidgetItem, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 
-from .appdata import export_database, prepare_working_database
+from .appdata import export_database, export_user_data, file_sha, prepare_working_database
 from .calculator import CalculationInputs, CalculationResult, PropellerCalculator, battery_spec
 from .charts import ChartSeries, LoadChart
 from .config import APP_NAME, APP_VERSION, AUTHOR
@@ -67,6 +74,14 @@ DEFAULTS = {
 
 FRAME_SIZE_PRESETS_MM = (65, 75, 85, 100, 120, 150, 180, 210, 250, 300, 330, 350,
                          400, 450, 500, 550, 600, 650, 700, 800, 1000)
+
+# Build-card fields whose unsaved edits gate the close confirmation.
+# Calculator inputs are intentionally excluded: they are live-computed and
+# only become persistent when saved as a build.
+BUILD_DIRTY_KEYS = frozenset({
+    "build_name", "motor_name", "battery_name", "esc_name", "frame_name",
+    "build_payload",
+})
 
 ACCESSORY_DEFAULTS: tuple[dict[str, Any], ...] = (
     {"category": "flight_controller", "model": "", "quantity": 1, "mass_kg": 0.015, "enabled": True},
@@ -257,9 +272,67 @@ QToolTip {background:#E7F2F2;color:#102126;border:1px solid #3A7775;padding:10px
 """
 
 
+class CalcInputErrors(ValueError):
+    """Parse failures for calculator numeric fields.
+
+    Carries ``field_errors`` as a list of ``(field_key, raw_value)`` tuples
+    in parse order. Raised by ``_inputs``; handled inline by ``calculate``
+    (no modal), while all other exceptions keep the critical modal.
+    """
+
+    def __init__(self, field_errors: list[tuple[str, str]]) -> None:
+        super().__init__("; ".join(f"{key}={raw!r}" for key, raw in field_errors))
+        self.field_errors = field_errors
+
+
+RESTORE_REQUIRED_TABLES = ("models", "performance_points", "sources")
+
+
+def validate_restore_candidate(path: str | Path) -> tuple[bool, str]:
+    """Fail-closed validation for a database file picked for restore.
+
+    Opens the candidate read-only and checks ``PRAGMA quick_check``,
+    the required tables and a basic model-count sanity check.
+    Returns ``(ok, message)``; never raises and never touches the
+    working database.
+    """
+    candidate = Path(path)
+    if not candidate.is_file():
+        return False, f"File does not exist: {candidate}"
+    connection: sqlite3.Connection | None = None
+    try:
+        connection = sqlite3.connect(f"file:{candidate.as_posix()}?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+        quick_rows = connection.execute("PRAGMA quick_check").fetchall()
+        quick_values = [str(row[0]) for row in quick_rows]
+        if not (len(quick_values) == 1 and quick_values[0].strip().lower() == "ok"):
+            detail = "; ".join(quick_values)[:300] or "empty quick_check"
+            return False, f"Integrity check failed: {detail}"
+        available = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        missing = [name for name in RESTORE_REQUIRED_TABLES if name not in available]
+        if missing:
+            return False, f"Required tables missing: {', '.join(missing)}"
+        model_count = connection.execute("SELECT COUNT(*) FROM models").fetchone()[0]
+        try:
+            model_count = int(model_count)
+        except (TypeError, ValueError):
+            return False, "Model count sanity check failed"
+        if model_count <= 0:
+            return False, "Database contains no propeller models"
+        return True, f"OK: {model_count} models"
+    except Exception as exc:  # noqa: BLE001 - validation must never raise
+        return False, f"{type(exc).__name__}: {exc}"
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:  # noqa: BLE001 - best effort
+                pass
+
+
 class PropellerMark(QWidget):
     """Small vector propeller/motor mark; scales cleanly at 100–200% DPI."""
-
     def __init__(self) -> None:
         super().__init__()
         self.setFixedSize(58, 58)
@@ -305,6 +378,10 @@ class PropellerMainWindow(QMainWindow):
         self.tooltips_enabled = self._setting("tooltips", "1") == "1"
         self.state = dict(DEFAULTS)
         self.build_accessories = [dict(item) for item in ACCESSORY_DEFAULTS]
+        # Unsaved build-card edits (name/part names/payload/description/note/
+        # accessories). Set on user edits, cleared on save/update/select/import.
+        # Calculator inputs never set it (see BUILD_DIRTY_KEYS).
+        self._dirty = False
         self._updating_accessories = False
         self._accessory_mass_applied_kg = 0.0
         self._loading_preset = False
@@ -349,8 +426,49 @@ class PropellerMainWindow(QMainWindow):
         return UI_TEXT[self.language].get(key, key)
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        if getattr(self, "_dirty", False):
+            if not self._confirm(self.tr("confirm_close")):
+                event.ignore()
+                return
         self.repository.close()
         event.accept()
+
+    def _confirm_box(self, text: str, informative: str = "") -> QMessageBox:
+        """Yes/No question with the safe answer as explicit default + escape."""
+        box = QMessageBox(self)
+        box.setWindowTitle(APP_NAME)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(text)
+        if informative:
+            box.setInformativeText(informative)
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        box.setEscapeButton(QMessageBox.StandardButton.No)
+        return box
+
+    def _confirm(self, text: str, informative: str = "") -> bool:
+        return self._confirm_box(text, informative).exec() == QMessageBox.StandardButton.Yes
+
+    def _mark_dirty(self) -> None:
+        self._dirty = True
+
+    def _clear_dirty(self) -> None:
+        self._dirty = False
+
+    def _ready_message(self) -> str:
+        return f"{self.tr('ready_status')} · {AUTHOR} · {self.database_path}"
+
+    def _begin_busy(self) -> None:
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        self.statusBar().showMessage(self.tr("busy_working"))
+        QApplication.processEvents()
+
+    def _end_busy(self) -> None:
+        try:
+            QApplication.restoreOverrideCursor()
+        finally:
+            self.statusBar().showMessage(self._ready_message())
 
     def _snapshot(self) -> None:
         self._snapshot_accessories()
@@ -369,6 +487,11 @@ class PropellerMainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         old_index = self.tabs.currentIndex() if hasattr(self, "tabs") else 0
+        # Dispose the previous UI tree: setCentralWidget() does not delete the
+        # replaced central widget, so without this each rebuild (language/units
+        # switch) left the old tree as hidden-but-alive children of the window
+        # and findChildren() counts (e.g. primary buttons) grew 6->12->18.
+        old_central = self.takeCentralWidget()
         self.edits, self.edit_widgets, self.combos, self.combo_widgets = {}, {}, {}, {}
         self.model_combos, self.tip_widgets, self.tip_keys, self.context_help_labels = [], [], {}, []
         self.reference_point_combos, self.source_preset_labels, self.comparison_explain_labels = [], [], []
@@ -386,12 +509,14 @@ class PropellerMainWindow(QMainWindow):
             self.tabs.addTab(builder(), self.tr(key))
         root_layout.addWidget(self.tabs, 1)
         self.setCentralWidget(root)
-        self.setStatusBar(QStatusBar())
+        if old_central is not None:
+            old_central.deleteLater()
         self.statusBar().showMessage(f"{self.tr('ready_status')} · {AUTHOR} · {self.database_path}")
         self.tabs.setCurrentIndex(min(old_index, self.tabs.count() - 1))
         self._apply_tooltips()
         self._apply_responsive(self.width())
         self._update_preset_status()
+        self._refresh_empty_states()
         if self.current_result and self.current_inputs:
             self._display_result(self.current_result, self.current_inputs)
             self._refresh_trace()
@@ -547,6 +672,8 @@ class PropellerMainWindow(QMainWindow):
             if widget is not source and widget.text() != value:
                 with QSignalBlocker(widget):
                     widget.setText(value)
+        if key in BUILD_DIRTY_KEYS:
+            self._mark_dirty()
         if not self._loading_preset and key in {
             "voltage", "throttle", "kv", "speed", "mass", "motors", "esc", "capacity",
             "c_rating", "battery_s", "rm", "i0", "motor_max_current", "motor_max_power", "density",
@@ -626,6 +753,7 @@ class PropellerMainWindow(QMainWindow):
     def _sync_model(self, source: QComboBox) -> None:
         model_id = str(source.currentData() or source.currentText().strip())
         self.selected_model_id = model_id
+        self._refresh_calc_empty()
         for widget in self.model_combos:
             if widget is source:
                 continue
@@ -842,6 +970,17 @@ class PropellerMainWindow(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(8, 6, 8, 8)
+        self.calc_error_label = QLabel()
+        self.calc_error_label.setObjectName("calcInputError")
+        self.calc_error_label.setWordWrap(True)
+        self.calc_error_label.setVisible(False)
+        self.calc_error_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.calc_error_label.setStyleSheet("color:#FF7F71;font-weight:700;")
+        self.calc_error_label.setAccessibleName("calcInputError")
+        layout.addWidget(self.calc_error_label)
+        self._calc_error_originals = {}
+        self.calc_empty_label = self._empty_label("empty_calculator", "calcEmpty")
+        layout.addWidget(self.calc_empty_label)
         self.calculator_modes = QTabWidget()
         self.calculator_modes.setObjectName("calculatorModes")
         self.calculator_modes.addTab(self._simple_calculator_page(), self.tr("simple_mode"))
@@ -851,6 +990,7 @@ class PropellerMainWindow(QMainWindow):
         self.calculator_modes.currentChanged.connect(
             lambda index: self._save_setting("calculator_mode", str(index)))
         layout.addWidget(self.calculator_modes)
+        self._refresh_calc_empty()
         return tab
 
     def _mode_intro(self, text: str) -> QLabel:
@@ -858,6 +998,58 @@ class PropellerMainWindow(QMainWindow):
         label.setWordWrap(True)
         label.setObjectName("modeIntro")
         return label
+
+    def _empty_label(self, key: str, accessible: str) -> QLabel:
+        label = QLabel(self.tr(key))
+        label.setWordWrap(True)
+        label.setObjectName("modeIntro")
+        label.setAccessibleName(accessible)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        return label
+
+    def _refresh_calc_empty(self) -> None:
+        label = getattr(self, "calc_empty_label", None)
+        if label is None:
+            return
+        try:
+            combo_empty = self.model_combo.count() == 0 if hasattr(self, "model_combo") else False
+        except RuntimeError:
+            combo_empty = True
+        has_model = bool((self.selected_model_id or "").strip()) and not combo_empty
+        label.setVisible(not has_model)
+
+    def _refresh_db_empty(self) -> None:
+        label = getattr(self, "db_empty_label", None)
+        if label is None or not hasattr(self, "model_table"):
+            return
+        try:
+            label.setVisible(self.model_table.rowCount() == 0)
+        except RuntimeError:
+            pass
+
+    def _refresh_builds_empty(self) -> None:
+        label = getattr(self, "builds_empty_label", None)
+        if label is None or not hasattr(self, "build_table"):
+            return
+        try:
+            label.setVisible(self.build_table.rowCount() == 0)
+        except RuntimeError:
+            pass
+
+    def _refresh_compare_empty(self) -> None:
+        label = getattr(self, "compare_empty_label", None)
+        if label is None:
+            return
+        try:
+            label.setVisible(len(self.compare_items) == 0)
+        except RuntimeError:
+            pass
+
+    def _refresh_empty_states(self) -> None:
+        self._refresh_calc_empty()
+        self._refresh_db_empty()
+        self._refresh_builds_empty()
+        self._refresh_compare_empty()
 
     def _medium_combo(self) -> QComboBox:
         labels = [("Повітря" if self.language == "uk" else "Air", "air"),
@@ -935,14 +1127,15 @@ class PropellerMainWindow(QMainWindow):
         layout.addWidget(label)
         return group
 
-    def _source_math_group(self) -> QGroupBox:
+    def _source_math_group(self, table_name: str = "referenceTable") -> QGroupBox:
         group = QGroupBox(self.tr("source_vs_math"))
         layout = QVBoxLayout(group)
         note = QLabel(self.tr("source_math_note"))
         note.setWordWrap(True)
         layout.addWidget(note)
         table = self._table([self.tr("method"), "RPM", "J", "Ct", "Cp", "η / FOM",
-                             self.tr("thrust_per_motor"), self.tr("prop_power_per_motor"), self.tr("source")])
+                             self.tr("thrust_per_motor"), self.tr("prop_power_per_motor"), self.tr("source")],
+                            table_name)
         table.setRowCount(2)
         table.setMaximumHeight(116)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -975,8 +1168,14 @@ class PropellerMainWindow(QMainWindow):
         calculate.clicked.connect(self.calculate)
         add = QPushButton(self.tr("add_compare"))
         add.clicked.connect(self.add_current_to_compare)
+        pdf = QPushButton(
+            "Експорт PDF-звіту" if self.language == "uk" else "Export PDF report")
+        pdf.setObjectName("exportCalcPdf")
+        pdf.setAccessibleName("exportCalcPdf")
+        pdf.clicked.connect(self.export_calc_pdf_report)
         actions.addWidget(calculate, 2)
         actions.addWidget(add, 1)
+        actions.addWidget(pdf, 1)
         left_layout.addLayout(actions)
         left_layout.addWidget(self._context_help_group())
         left_layout.addStretch(1)
@@ -988,7 +1187,7 @@ class PropellerMainWindow(QMainWindow):
         simple_cards = (("thrust", "thrust_card"), ("current", "total_current_card"), ("power", "total_power_card"),
                         ("rpm", "rpm_card"), ("tw", "tw_card"), ("runtime", "runtime_card"))
         right_layout.addWidget(self._result_card_grid(simple_cards, self.simple_result_labels))
-        right_layout.addWidget(self._source_math_group())
+        right_layout.addWidget(self._source_math_group("referenceTableSimple"))
         note = QLabel(self.tr("simple_summary"))
         note.setWordWrap(True)
         right_layout.addWidget(note)
@@ -1032,8 +1231,14 @@ class PropellerMainWindow(QMainWindow):
         calculate.clicked.connect(self.calculate)
         add = QPushButton(self.tr("add_compare"))
         add.clicked.connect(self.add_current_to_compare)
+        pdf = QPushButton(
+            "Експорт PDF-звіту" if self.language == "uk" else "Export PDF report")
+        pdf.setObjectName("exportCalcPdf")
+        pdf.setAccessibleName("exportCalcPdf")
+        pdf.clicked.connect(self.export_calc_pdf_report)
         actions.addWidget(calculate, 2)
         actions.addWidget(add, 1)
+        actions.addWidget(pdf, 1)
         left_layout.addLayout(actions)
         left_layout.addWidget(self._context_help_group())
         left_layout.addStretch(1)
@@ -1048,7 +1253,7 @@ class PropellerMainWindow(QMainWindow):
                  ("battery_margin", "battery_margin_card"), ("structural", "structural_card"),
                  ("confidence", "confidence_card"), ("evidence", "evidence_card"))
         right_layout.addWidget(self._result_card_grid(cards, self.result_labels))
-        right_layout.addWidget(self._source_math_group())
+        right_layout.addWidget(self._source_math_group("referenceTableEngineering"))
 
         efficiency = QGroupBox(self.tr("efficiency"))
         eff = QGridLayout(efficiency)
@@ -1129,33 +1334,146 @@ class PropellerMainWindow(QMainWindow):
 
     def _inputs(self) -> CalculationInputs:
         self._snapshot()
+        errors: list[tuple[str, str]] = []
+
+        def parse_float(key: str) -> float | None:
+            raw = str(self.state.get(key, ""))
+            try:
+                return float(raw)
+            except (ValueError, TypeError):
+                errors.append((key, raw))
+                return None
+
+        def parse_optional(key: str) -> float | None:
+            raw = str(self.state.get(key, ""))
+            if not raw.strip():
+                return None
+            try:
+                return float(raw)
+            except (ValueError, TypeError):
+                errors.append((key, raw))
+                return None
+
+        def parse_int(key: str) -> int | None:
+            raw = str(self.state.get(key, ""))
+            try:
+                return int(float(raw))
+            except (ValueError, TypeError):
+                errors.append((key, raw))
+                return None
+
+        voltage = parse_float("voltage")
+        throttle = parse_float("throttle")
+        kv = parse_float("kv")
+        esc = parse_float("esc")
+        capacity = parse_float("capacity")
+        c_rating = parse_float("c_rating")
+        density = parse_float("density")
+        speed_raw = parse_float("speed")
+        mass_raw = parse_float("mass")
+        motors = parse_int("motors")
+        battery_s = parse_int("battery_s")
+        rm = parse_optional("rm")
+        i0 = parse_optional("i0")
+        motor_max_current = parse_optional("motor_max_current")
+        motor_max_power = parse_optional("motor_max_power")
+        rpm_override: float | None = None
+        source_point_id: int | None = None
+        if self.state.get("configuration_mode") == "database":
+            ref_rpm_raw = str(self.state.get("reference_rpm", ""))
+            if ref_rpm_raw.strip():
+                try:
+                    rpm_override = float(ref_rpm_raw)
+                except (ValueError, TypeError):
+                    errors.append(("reference_rpm", ref_rpm_raw))
+            ref_pid_raw = str(self.state.get("reference_point_id", ""))
+            if ref_pid_raw.strip():
+                try:
+                    source_point_id = int(ref_pid_raw)
+                except (ValueError, TypeError):
+                    errors.append(("reference_point_id", ref_pid_raw))
+        if errors:
+            raise CalcInputErrors(errors)
+        assert voltage is not None and throttle is not None and kv is not None
+        assert esc is not None and capacity is not None and c_rating is not None
+        assert density is not None and speed_raw is not None and mass_raw is not None
+        assert motors is not None and battery_s is not None
         return CalculationInputs(
             model_id=str(self.selected_model_id or self.model_combo.currentData() or self.model_combo.currentText().strip()),
-            voltage_v=float(self.state["voltage"]), throttle=float(self.state["throttle"]) / 100,
-            motor_kv=float(self.state["kv"]), motor_resistance_ohm=self._optional(self.state["rm"]),
-            motor_i0_a=self._optional(self.state["i0"]),
-            motor_max_current_a=self._optional(self.state["motor_max_current"]),
-            motor_max_power_w=self._optional(self.state["motor_max_power"]),
-            esc_current_a=float(self.state["esc"]), battery_capacity_ah=float(self.state["capacity"]),
-            battery_c_rating=float(self.state["c_rating"]), battery_s=int(float(self.state["battery_s"])),
+            voltage_v=voltage, throttle=throttle / 100,
+            motor_kv=kv, motor_resistance_ohm=rm,
+            motor_i0_a=i0,
+            motor_max_current_a=motor_max_current,
+            motor_max_power_w=motor_max_power,
+            esc_current_a=esc, battery_capacity_ah=capacity,
+            battery_c_rating=c_rating, battery_s=battery_s,
             battery_type=self.state.get("battery_type", "LiPo"),
-            speed_m_s=float(to_si(float(self.state["speed"]), "speed", self.unit_system)),
-            mass_kg=float(to_si(float(self.state["mass"]), "mass_kg", self.unit_system)),
-            motor_count=int(float(self.state["motors"])), density_kg_m3=float(self.state["density"]),
+            speed_m_s=float(to_si(speed_raw, "speed", self.unit_system)),
+            mass_kg=float(to_si(mass_raw, "mass_kg", self.unit_system)),
+            motor_count=motors, density_kg_m3=density,
             medium=self.state["medium"],
-            rpm_override=(float(self.state["reference_rpm"])
-                          if self.state.get("configuration_mode") == "database" and self.state.get("reference_rpm")
-                          else None),
-            source_point_id=(int(self.state["reference_point_id"])
-                             if self.state.get("configuration_mode") == "database" and self.state.get("reference_point_id")
-                             else None))
+            rpm_override=rpm_override,
+            source_point_id=source_point_id)
+
+    def _clear_calc_input_error(self) -> None:
+        originals = getattr(self, "_calc_error_originals", {})
+        for widget_id, (widget_ref, original) in list(originals.items()):
+            try:
+                widget_ref.setStyleSheet(original)
+            except RuntimeError:
+                pass
+        self._calc_error_originals = {}
+        label = getattr(self, "calc_error_label", None)
+        if label is not None:
+            label.clear()
+            label.setVisible(False)
+
+    def _show_calc_input_error(self, field_errors: list[tuple[str, str]]) -> None:
+        self._clear_calc_input_error()
+        parts = []
+        for key, raw in field_errors:
+            label = self.tr(key)
+            parts.append(f"{label} ({key}): {raw!r}")
+        message = f"{self.tr('calculation_error')}: " + "; ".join(parts)
+        label_widget = getattr(self, "calc_error_label", None)
+        if label_widget is not None:
+            label_widget.setText(message)
+            label_widget.setVisible(True)
+        first_key = field_errors[0][0]
+        widgets: list = []
+        widgets.extend(self.edit_widgets.get(first_key, []))
+        widgets.extend(self.combo_widgets.get(first_key, []))
+        canonical = self.edits.get(first_key) or self.combos.get(first_key)
+        if canonical is None and first_key == "reference_point_id":
+            combos = getattr(self, "reference_point_combos", [])
+            canonical = combos[0] if combos else None
+        if canonical is not None and canonical not in widgets:
+            widgets.append(canonical)
+        for widget in widgets:
+            try:
+                if id(widget) not in self._calc_error_originals:
+                    self._calc_error_originals[id(widget)] = (widget, widget.styleSheet())
+                original = self._calc_error_originals[id(widget)][1]
+                widget.setStyleSheet(original + "\nQLineEdit{border:1px solid #E5484D;}\nQComboBox{border:1px solid #E5484D;}")
+            except RuntimeError:
+                pass
+        if canonical is not None:
+            try:
+                canonical.setFocus(Qt.FocusReason.OtherFocusReason)
+            except RuntimeError:
+                pass
 
     def calculate(self) -> None:
+        self._clear_calc_input_error()
         try:
             inputs = self._inputs()
+        except CalcInputErrors as exc:
+            self._show_calc_input_error(exc.field_errors)
+            return
+        try:
             result = self.calculator.calculate(inputs)
         except Exception as exc:
-            QMessageBox.critical(self, APP_NAME, f"{self.tr('calculation_error')}:\n{exc}")
+            QMessageBox.critical(self, APP_NAME, f"{self.tr('calculation_error')}:\n{self.tr('details')}: {exc}")
             return
         self.current_inputs, self.current_result = inputs, result
         self.selected_model_id = inputs.model_id
@@ -1172,7 +1490,7 @@ class PropellerMainWindow(QMainWindow):
             "current": f"{p.current_a * inputs.motor_count:,.1f} A",
             "power": self._format_power(p.electrical_power_w * inputs.motor_count),
             "rpm": f"{p.rpm:,.0f}", "tw": f"{result.thrust_to_weight:.2f}",
-            "runtime": f"{result.runtime_min:.1f} min", "esc_margin": f"{result.esc_margin_percent:+.0f}%",
+            "runtime": "—" if math.isnan(result.runtime_min) else f"{result.runtime_min:.1f} min", "esc_margin": f"{result.esc_margin_percent:+.0f}%",
             "battery_margin": f"{result.battery_margin_percent:+.0f}%",
             "structural": "n/a" if result.structural_rpm is None else f"{p.rpm:,.0f} / {result.structural_rpm:,.0f}",
             "confidence": f"{p.confidence * 100:.0f}%", "evidence": f"{self._evidence_name(p.evidence)} · {p.source_type}",
@@ -1281,13 +1599,49 @@ class PropellerMainWindow(QMainWindow):
             "Operating point is outside a measured/predicted table range; nearest-edge extrapolation used":
                 "Робоча точка поза діапазоном таблиці; використано найближчий край з ознакою екстраполяції.",
             "ESC current limit exceeded": "Перевищено допустимий струм ESC.",
+            "Motor current limit exceeded": "Перевищено допустимий струм мотора.",
+            "Motor power limit exceeded": "Перевищено допустиму потужність мотора.",
             "Battery C-rating current limit exceeded": "Перевищено струмовий ліміт батареї за C-рейтингом.",
             "Structural RPM limit exceeded": "Перевищено структурний ліміт RPM пропелера.",
             "Water mode uses air-derived dimensionless coefficients; cavitation is not modeled and bench validation is mandatory":
                 "Водний режим використовує безрозмірні коефіцієнти з повітряних даних; кавітація не моделюється, стендова перевірка обов'язкова.",
+            "Non-positive mass_kg; T/W uses a guarded minimum and is not meaningful":
+                "Непозитивна маса; T/W обчислено з мінімальним обмеженням і не має сенсу.",
+            "Non-positive density_kg_m3; thrust/power scale with density and are not meaningful":
+                "Непозитивна густина середовища; тяга і потужність масштабуються з густиною й не мають сенсу.",
+            "Negative battery capacity/C-rating; runtime and margins are not meaningful":
+                "Від'ємна ємність батареї або C-рейтинг; час роботи й запаси не мають сенсу.",
+            "Negative motor_resistance_ohm; result is not meaningful":
+                "Від'ємний опір обмотки мотора; результат не має сенсу.",
+            "Negative motor_max_current_a; margin is not meaningful":
+                "Від'ємний максимальний струм мотора; запас не має сенсу.",
+            "Negative motor_max_power_w; margin is not meaningful":
+                "Від'ємна максимальна потужність мотора; запас не має сенсу.",
+            "Non-positive motor_count treated as 1":
+                "Непозитивна кількість моторів; використано 1.",
+            "No valid operating point; runtime is not meaningful":
+                "Немає дійсної робочої точки; час роботи не має сенсу.",
         }
         if warning in exact:
             return exact[warning]
+        if warning.startswith("Non-finite input "):
+            name = warning[len("Non-finite input "):].split(";", 1)[0].strip()
+            ua_names = {
+                "mass_kg": "маса",
+                "density_kg_m3": "густина середовища",
+                "voltage_v": "напруга",
+                "throttle": "газ",
+                "motor_kv": "KV мотора",
+                "battery_capacity_ah": "ємність батареї",
+                "battery_c_rating": "C-рейтинг батареї",
+                "esc_current_a": "струм ESC",
+                "speed_m_s": "швидкість потоку",
+                "motor_resistance_ohm": "опір обмотки мотора (Rm)",
+                "motor_max_current_a": "максимальний струм мотора",
+                "motor_max_power_w": "максимальна потужність мотора",
+            }
+            ua_name = ua_names.get(name, name)
+            return f"Некоректне (нескінченне або нечислове) вхідне значення: {ua_name}; результат не має сенсу."
         if warning.startswith("Simplified-model estimate: missing "):
             missing = warning.split("missing ", 1)[1]
             missing = missing.replace("Rm / motor winding resistance", "Rm / опір обмотки мотора")
@@ -1352,8 +1706,11 @@ class PropellerMainWindow(QMainWindow):
              ChartSeries(self.tr("powertrain"), "#C792EA", system_points)], marker_x=marker)
 
     @staticmethod
-    def _table(headers: list[str]) -> QTableWidget:
+    def _table(headers: list[str], name: str = "") -> QTableWidget:
         table = QTableWidget(0, len(headers))
+        if name:
+            table.setObjectName(name)
+            table.setAccessibleName(name)
         table.setHorizontalHeaderLabels(headers)
         table.setAlternatingRowColors(True)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -1404,10 +1761,19 @@ class PropellerMainWindow(QMainWindow):
         exp = QPushButton(self.tr("export"))
         exp.clicked.connect(self.export_db)
         controls.addWidget(exp)
+        res = QPushButton(
+            "Відновити базу даних…" if self.language == "uk" else "Restore database…")
+        res.setObjectName("restoreDatabase")
+        res.setAccessibleName("restoreDatabase")
+        res.clicked.connect(self.restore_database)
+        controls.addWidget(res)
         layout.addLayout(controls)
+        self.db_empty_label = self._empty_label("empty_database", "dbEmpty")
+        layout.addWidget(self.db_empty_label)
         splitter = QSplitter(Qt.Orientation.Vertical)
         self.model_table = self._table(["Model_ID", self.tr("original"), self.tr("manufacturer"), self.tr("size"),
-                                        self.tr("evidence"), self.tr("points"), self.tr("geometry")])
+                                        self.tr("evidence"), self.tr("points"), self.tr("geometry")],
+                                       "modelTable")
         self.model_table.itemSelectionChanged.connect(self._model_selected)
         splitter.addWidget(self.model_table)
         points = QWidget()
@@ -1421,7 +1787,8 @@ class PropellerMainWindow(QMainWindow):
         point_controls.addWidget(self.point_filter, 1)
         points_layout.addLayout(point_controls)
         self.point_table = self._table(["RPM", "J", "Ct", "Cp", "η", f"{self.tr('thrust_card')} N",
-                                        f"{self.tr('power_card')} W", self.tr("class"), self.tr("source_file")])
+                                        f"{self.tr('power_card')} W", self.tr("class"), self.tr("source_file")],
+                                       "pointTable")
         points_layout.addWidget(self.point_table)
         splitter.addWidget(points)
         splitter.setSizes([330, 240])
@@ -1446,6 +1813,7 @@ class PropellerMainWindow(QMainWindow):
             self.model_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         if self.model_table.rowCount():
             self.model_table.setCurrentCell(0, 0)
+        self._refresh_db_empty()
 
     def _model_selected(self) -> None:
         row_index = self.model_table.currentRow()
@@ -1473,9 +1841,16 @@ class PropellerMainWindow(QMainWindow):
 
     def import_data(self) -> None:
         source, _ = QFileDialog.getOpenFileName(
-            self, self.tr("import"), "", "Supported (*.db *.zip *.zipx *.xlsx *.csv *.dat *.pe0);;All (*.*)")
+            self, self.tr("import"), "",
+            "Supported (*.pudb *.db *.zip *.zipx *.xlsx *.csv *.dat *.pe0);;"
+            "Propeller user data (*.pudb);;SQLite (*.db);;All (*.*)")
         if not source:
             return
+        if not self._confirm(
+                self.tr("confirm_import"),
+                self.tr("confirm_import_info").format(source=source)):
+            return
+        self._begin_busy()
         try:
             service = RuntimeImportService(self.repository.connection, self.database_path, self.paths["backups"])
             report = service.import_path(source)
@@ -1484,13 +1859,356 @@ class PropellerMainWindow(QMainWindow):
             self._snapshot()
             self._build_ui()
         except Exception as exc:
-            QMessageBox.critical(self, APP_NAME, f"{self.tr('import_failed')}:\n{exc}")
+            QMessageBox.critical(self, APP_NAME, f"{self.tr('import_failed')}:\n{self.tr('details')}: {exc}")
+        finally:
+            self._end_busy()
 
     def export_db(self) -> None:
-        target, _ = QFileDialog.getSaveFileName(self, self.tr("export"), "propellers.db", "SQLite (*.db)")
+        """User-only export: saved builds/components, motors, batteries, frames + manifest.
+
+        Full-corpus connection.backup copies stay reserved for the internal
+        backups/ safety copies (import backup, restore safety backup) and are
+        never written from this handler.
+        """
+        target, _ = QFileDialog.getSaveFileName(
+            self, self.tr("export"), "userdata.pudb", "Propeller user data (*.pudb)")
         if target:
-            export_database(self.repository.connection, Path(target))
+            if not target.lower().endswith(".pudb"):
+                target += ".pudb"
+            self._begin_busy()
+            try:
+                try:
+                    source_sha = file_sha(self.database_path)
+                except OSError:
+                    source_sha = ""
+                export_user_data(self.repository.connection, Path(target), source_sha256=source_sha)
+            finally:
+                self._end_busy()
             QMessageBox.information(self, APP_NAME, f"{self.tr('exported')}:\n{target}")
+
+    def _remove_sidecar_journals(self) -> None:
+        for suffix in (".db-wal", ".db-shm", "-wal", "-shm"):
+            sidecar = self.database_path.parent / (self.database_path.name + suffix)
+            try:
+                if sidecar.exists():
+                    sidecar.unlink()
+            except OSError:
+                pass
+
+    def _safety_backup_before_restore(self) -> Path:
+        """Timestamped safety copy of the working DB (restore counterpart of import backup)."""
+        backups = self.paths["backups"]
+        backups.mkdir(parents=True, exist_ok=True)
+        target = backups / (
+            f"propellers-before-restore-{time.strftime('%Y%m%d-%H%M%S')}-"
+            f"{time.time_ns() % 1_000_000_000:09d}-{uuid.uuid4().hex[:8]}.db")
+        destination = sqlite3.connect(target)
+        try:
+            self.repository.connection.backup(destination)
+        finally:
+            destination.close()
+        return target
+
+    def restore_database_from_path(self, source: str | Path) -> Path:
+        """Validate, back up, atomically replace and reopen the working database.
+
+        Raises on any failure; the original working database is left intact
+        (fail closed). Returns the safety-backup path on success.
+        """
+        candidate = Path(source)
+        ok, message = validate_restore_candidate(candidate)
+        if not ok:
+            raise ValueError(message)
+        if candidate.resolve() == self.database_path.resolve():
+            raise ValueError("The selected database is already the active working database")
+        backup = self._safety_backup_before_restore()
+        try:
+            self.repository.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:  # noqa: BLE001 - best effort before close
+            pass
+        self.repository.close()
+        try:
+            self._remove_sidecar_journals()
+            staging = self.database_path.with_suffix(".db.restoring")
+            shutil.copy2(candidate, staging)
+            os.replace(staging, self.database_path)
+            self._remove_sidecar_journals()
+        except Exception:
+            self.repository = Repository(self.database_path)
+            self.calculator = PropellerCalculator(self.repository)
+            self.repository.clear_caches()
+            raise
+        self.repository = Repository(self.database_path)
+        self.calculator = PropellerCalculator(self.repository)
+        self.repository.clear_caches()
+        return backup
+
+    def restore_database(self) -> None:
+        source, _ = QFileDialog.getOpenFileName(
+            self,
+            "Відновити базу даних…" if self.language == "uk" else "Restore database…",
+            "", "SQLite (*.db)")
+        if not source:
+            return
+        # Fail closed before asking anything: an unusable file gets the error
+        # dialog directly, never a replace confirmation.
+        ok, message = validate_restore_candidate(source)
+        if not ok:
+            QMessageBox.critical(
+                self, APP_NAME,
+                ("Відновлення не виконано" if self.language == "uk" else "Restore failed")
+                + f":\n{self.tr('details')}: {message}")
+            return
+        if not self._confirm(
+                self.tr("confirm_restore"),
+                self.tr("confirm_restore_info").format(
+                    source=source, target=self.database_path,
+                    backups=self.paths["backups"])):
+            return
+        self._begin_busy()
+        try:
+            backup = self.restore_database_from_path(source)
+        except Exception as exc:  # noqa: BLE001 - user-facing slot
+            QMessageBox.critical(
+                self, APP_NAME,
+                ("Відновлення не виконано" if self.language == "uk" else "Restore failed")
+                + f":\n{self.tr('details')}: {exc}")
+            return
+        finally:
+            self._end_busy()
+        self._snapshot()
+        self._build_ui()
+        QMessageBox.information(
+            self, APP_NAME,
+            ("Базу даних відновлено" if self.language == "uk" else "Database restored")
+            + f":\n{source}\n"
+            + ("Резервна копія" if self.language == "uk" else "Safety backup")
+            + f":\n{backup}")
+
+    @staticmethod
+    def _report_number(value: Any, digits: int = 2) -> str:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return "n/a"
+        if math.isnan(numeric) or math.isinf(numeric):
+            return "n/a"
+        return f"{numeric:,.{digits}f}"
+
+    def _report_header_html(self, title: str) -> str:
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return (
+            f"<h1>{_html_escape(APP_NAME)}</h1>"
+            f"<p><b>{_html_escape(title)}</b><br>"
+            f"Version: {_html_escape(APP_VERSION)} · Author: {_html_escape(AUTHOR)}<br>"
+            f"Generated: {_html_escape(stamp)}</p>"
+        )
+
+    def _build_calc_report_html(self) -> str:
+        inputs = self.current_inputs
+        result = self.current_result
+        parts = [self._report_header_html(
+            "Звіт розрахунку" if self.language == "uk" else "Calculation report")]
+        if inputs is None or result is None:
+            parts.append("<p><b>" + _html_escape(
+                "Немає дійсного розрахунку; перевірте вхідні дані."
+                if self.language == "uk" else
+                "No valid calculation available; check the inputs.") + "</b></p>")
+            parts.append("<p>Model: " + _html_escape(
+                str(self.selected_model_id or "—")) + "</p>")
+            return ("<html><body>" + "".join(parts) + "</body></html>")
+        point = result.point
+        rows = [
+            ("Model", str(inputs.model_id)),
+            ("Voltage (V)", self._report_number(inputs.voltage_v)),
+            ("Throttle (%)", self._report_number(inputs.throttle * 100.0, 1)),
+            ("Motor KV (RPM/V)", self._report_number(inputs.motor_kv, 1)),
+            ("Speed (m/s)", self._report_number(inputs.speed_m_s, 3)),
+            ("Mass (kg)", self._report_number(inputs.mass_kg, 3)),
+            ("Motors", str(inputs.motor_count)),
+            ("ESC limit (A)", self._report_number(inputs.esc_current_a, 1)),
+            ("Battery", f"{_html_escape(str(inputs.battery_type))} "
+                        f"{inputs.battery_s}S / {self._report_number(inputs.battery_capacity_ah)} Ah / "
+                        f"{self._report_number(inputs.battery_c_rating, 0)}C"),
+            ("Medium / density", f"{_html_escape(str(inputs.medium))} / "
+                                 f"{self._report_number(inputs.density_kg_m3, 3)} kg/m³"),
+        ]
+        parts.append("<h2>" + _html_escape("Вхідні дані" if self.language == "uk" else "Inputs") + "</h2>")
+        parts.append("<table border='1' cellspacing='0' cellpadding='4'>")
+        for name, value in rows:
+            parts.append(f"<tr><td>{_html_escape(name)}</td><td>{value}</td></tr>")
+        parts.append("</table>")
+        motor_margin = (result.motor_current_margin_percent
+                        if result.motor_current_margin_percent is not None
+                        else result.motor_power_margin_percent)
+        cards = [
+            ("Total thrust (N)", self._report_number(result.total_thrust_n)),
+            ("Total current (A)", self._report_number(point.current_a * inputs.motor_count, 1)),
+            ("Total electrical power (W)",
+             self._report_number(point.electrical_power_w * inputs.motor_count, 1)),
+            ("RPM", self._report_number(point.rpm, 0)),
+            ("T/W", self._report_number(result.thrust_to_weight)),
+            ("Runtime (min)", self._report_number(result.runtime_min, 1)),
+            ("ESC margin (%)", self._report_number(result.esc_margin_percent, 0)),
+            ("Motor margin (%)",
+             "n/a" if motor_margin is None else self._report_number(motor_margin, 0)),
+            ("Battery margin (%)", self._report_number(result.battery_margin_percent, 0)),
+            ("Structural RPM",
+             "n/a" if result.structural_rpm is None else self._report_number(result.structural_rpm, 0)),
+            ("Confidence (%)", self._report_number(point.confidence * 100.0, 0)),
+            ("Evidence", f"{_html_escape(str(point.evidence))} · {_html_escape(str(point.source_type))}"),
+        ]
+        parts.append("<h2>" + _html_escape("Результати" if self.language == "uk" else "Results") + "</h2>")
+        parts.append("<table border='1' cellspacing='0' cellpadding='4'>")
+        for name, value in cards:
+            parts.append(f"<tr><td>{_html_escape(name)}</td><td>{value}</td></tr>")
+        parts.append("</table>")
+        try:
+            raw = self.repository.nearest_raw_point(
+                inputs.model_id, point.rpm, point.j, point.evidence)
+        except Exception:  # noqa: BLE001 - report must not crash
+            raw = None
+        parts.append("<h2>" + _html_escape(
+            "Джерело проти математики" if self.language == "uk" else "Source vs math") + "</h2>")
+        parts.append("<table border='1' cellspacing='0' cellpadding='4'>"
+                     "<tr><th>Method</th><th>RPM</th><th>J</th><th>Ct</th><th>Cp</th><th>Source</th></tr>")
+        if raw is None:
+            parts.append("<tr><td>Source row</td><td colspan='5'>n/a</td></tr>")
+        else:
+            try:
+                source = f"{raw['relative_path']}:{raw['source_row'] or '-'}"
+            except Exception:  # noqa: BLE001 - row shape varies
+                source = "n/a"
+            parts.append(
+                "<tr><td>Source row</td>"
+                f"<td>{self._report_number(raw['rpm'], 0)}</td>"
+                f"<td>{self._report_number(raw['advance_ratio_j'], 3)}</td>"
+                f"<td>{self._report_number(raw['ct'])}</td>"
+                f"<td>{self._report_number(raw['cp'])}</td>"
+                f"<td>{_html_escape(str(source))}</td></tr>")
+        parts.append(
+            "<tr><td>Math result</td>"
+            f"<td>{self._report_number(point.rpm, 0)}</td>"
+            f"<td>{self._report_number(point.j, 3)}</td>"
+            f"<td>{self._report_number(point.ct)}</td>"
+            f"<td>{self._report_number(point.cp)}</td>"
+            "<td>Ct/Cp interpolation + equations</td></tr>")
+        parts.append("</table>")
+        warnings = [self._localize_warning(item) for item in result.warnings] or [self.tr("no_warnings")]
+        if result.missing_parameters:
+            warnings = [self.tr("simplified")] + warnings
+        parts.append("<h2>" + _html_escape("Попередження" if self.language == "uk" else "Warnings") + "</h2>")
+        parts.append("<ul>")
+        for warning in warnings:
+            parts.append(f"<li>{_html_escape(str(warning))}</li>")
+        parts.append("</ul>")
+        return "<html><body>" + "".join(parts) + "</body></html>"
+
+    def _build_compare_report_html(self) -> str:
+        parts = [self._report_header_html(
+            "Звіт порівняння" if self.language == "uk" else "Comparison report")]
+        if not self.compare_items:
+            parts.append("<p><b>" + _html_escape(
+                "Список порівняння порожній." if self.language == "uk" else
+                "The comparison list is empty.") + "</b></p>")
+            return "<html><body>" + "".join(parts) + "</body></html>"
+        headers = ["#", "Name", "Thrust N", "Current A", "Power W", "T/W",
+                   "Runtime min", "ESC %", "Motor %", "Battery %", "Confidence %", "Source"]
+        parts.append(f"<p>{_html_escape(str(len(self.compare_items)))} "
+                     + _html_escape("варіантів" if self.language == "uk" else "entries") + "</p>")
+        parts.append("<table border='1' cellspacing='0' cellpadding='4'><tr>")
+        for header in headers:
+            parts.append(f"<th>{_html_escape(header)}</th>")
+        parts.append("</tr>")
+        for index, item in enumerate(self.compare_items, 1):
+            try:
+                cells = [
+                    str(index), str(item.get("label", "")),
+                    self._report_number(item.get("thrust")),
+                    self._report_number(item.get("current")),
+                    self._report_number(item.get("power"), 1),
+                    self._report_number(item.get("tw")),
+                    self._report_number(item.get("runtime"), 1),
+                    self._report_number(item.get("esc_margin"), 0),
+                    ("n/a" if item.get("motor_margin") is None
+                     else self._report_number(item.get("motor_margin"), 0)),
+                    self._report_number(item.get("battery_margin"), 0),
+                    self._report_number(float(item.get("confidence", 0)) * 100.0, 0),
+                    str(item.get("source", "")),
+                ]
+            except Exception:  # noqa: BLE001 - one bad row must not kill the report
+                cells = [str(index)] + ["n/a"] * (len(headers) - 1)
+            parts.append("<tr>" + "".join(
+                f"<td>{_html_escape(cell)}</td>" for cell in cells) + "</tr>")
+        parts.append("</table>")
+        return "<html><body>" + "".join(parts) + "</body></html>"
+
+    def _write_pdf_report(self, html: str, target: str | Path) -> Path:
+        """Render HTML to PDF atomically (temp file + rename, no partial output)."""
+        destination = Path(target)
+        if not destination.suffix.lower() == ".pdf":
+            destination = destination.with_suffix(".pdf")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        staging = destination.parent / (destination.name + ".writing")
+        try:
+            document = QTextDocument()
+            document.setHtml(html)
+            writer = QPdfWriter(str(staging))
+            writer.setTitle(f"{APP_NAME} {APP_VERSION}")
+            writer.setCreator(APP_NAME)
+            document.print_(writer)
+            del writer
+            del document
+            if not staging.is_file() or staging.stat().st_size == 0:
+                raise RuntimeError("PDF writer produced no output")
+            os.replace(staging, destination)
+        finally:
+            try:
+                if staging.exists():
+                    staging.unlink()
+            except OSError:
+                pass
+        return destination
+
+    def _export_pdf_report(self, html: str, default_name: str) -> None:
+        target, _ = QFileDialog.getSaveFileName(
+            self,
+            "Експорт PDF-звіту" if self.language == "uk" else "Export PDF report",
+            default_name, "PDF (*.pdf)")
+        if not target:
+            return
+        try:
+            written = self._write_pdf_report(html, target)
+        except Exception as exc:  # noqa: BLE001 - user-facing slot
+            QMessageBox.critical(
+                self, APP_NAME,
+                ("Експорт PDF не виконано" if self.language == "uk" else "PDF export failed")
+                + f":\n{self.tr('details')}: {exc}")
+            return
+        QMessageBox.information(
+            self, APP_NAME, f"{self.tr('exported')}:\n{written}")
+
+    def export_calc_pdf_report(self) -> None:
+        try:
+            html = self._build_calc_report_html()
+        except Exception as exc:  # noqa: BLE001 - invalid input state must not crash
+            QMessageBox.critical(
+                self, APP_NAME,
+                ("Експорт PDF не виконано" if self.language == "uk" else "PDF export failed")
+                + f":\n{self.tr('details')}: {exc}")
+            return
+        self._export_pdf_report(html, "calculation-report.pdf")
+
+    def export_compare_pdf_report(self) -> None:
+        try:
+            html = self._build_compare_report_html()
+        except Exception as exc:  # noqa: BLE001 - invalid state must not crash
+            QMessageBox.critical(
+                self, APP_NAME,
+                ("Експорт PDF не виконано" if self.language == "uk" else "PDF export failed")
+                + f":\n{self.tr('details')}: {exc}")
+            return
+        self._export_pdf_report(html, "comparison-report.pdf")
 
     def _payload(self) -> dict[str, Any]:
         self._snapshot_accessories()
@@ -1598,6 +2316,7 @@ class PropellerMainWindow(QMainWindow):
         if self._updating_accessories:
             return
         self._snapshot_accessories()
+        self._mark_dirty()
         self._refresh_accessory_table()
 
     def _update_accessory_total(self) -> None:
@@ -1614,6 +2333,7 @@ class PropellerMainWindow(QMainWindow):
         self._snapshot_accessories()
         self.build_accessories.append(
             {"category": "other", "model": "", "quantity": 1, "mass_kg": 0.0, "enabled": True})
+        self._mark_dirty()
         self._refresh_accessory_table()
         self.accessory_table.setCurrentCell(self.accessory_table.rowCount() - 1, 2)
 
@@ -1622,10 +2342,12 @@ class PropellerMainWindow(QMainWindow):
         row = self.accessory_table.currentRow() if hasattr(self, "accessory_table") else -1
         if 0 <= row < len(self.build_accessories):
             self.build_accessories.pop(row)
+            self._mark_dirty()
             self._refresh_accessory_table()
 
     def _reset_accessories(self) -> None:
         self.build_accessories = [dict(item) for item in ACCESSORY_DEFAULTS]
+        self._mark_dirty()
         self._refresh_accessory_table()
 
     def _apply_accessory_mass_to_payload(self) -> None:
@@ -1634,6 +2356,7 @@ class PropellerMainWindow(QMainWindow):
             float(item.get("mass_kg", 0)) * max(1, int(item.get("quantity", 1)))
             for item in self.build_accessories if item.get("enabled"))
         self._set_text_value("build_payload", f"{from_si(total_kg, 'mass_kg', self.unit_system):.10g}")
+        self._mark_dirty()
         try:
             current_mass_kg = float(to_si(float(self.state["mass"]), "mass_kg", self.unit_system))
             base_mass_kg = max(0.0, current_mass_kg - self._accessory_mass_applied_kg)
@@ -1655,7 +2378,8 @@ class PropellerMainWindow(QMainWindow):
         self.accessory_table = self._table([
             self.tr("module_included"), self.tr("module_type"), self.tr("module_model"),
             self.tr("module_quantity"), f"{self.tr('module_mass_each')}, {unit}",
-            f"{self.tr('module_mass_total')}, {unit}"])
+            f"{self.tr('module_mass_total')}, {unit}"],
+            "accessoryTable")
         self.accessory_table.setMinimumHeight(310)
         self.accessory_table.itemChanged.connect(self._accessory_item_changed)
         layout.addWidget(self.accessory_table, 1)
@@ -1722,10 +2446,12 @@ class PropellerMainWindow(QMainWindow):
         self.build_description = QPlainTextEdit(self.state["build_description"])
         self.build_description.setMaximumHeight(95)
         self.build_description.setPlaceholderText(self.tr("description_hint"))
+        self.build_description.textChanged.connect(self._mark_dirty)
         form.addRow(self.tr("description"), self.build_description)
         self.build_note = QPlainTextEdit(self.state["build_note"])
         self.build_note.setMaximumHeight(85)
         self.build_note.setPlaceholderText(self.tr("note_hint"))
+        self.build_note.textChanged.connect(self._mark_dirty)
         form.addRow(self.tr("note"), self.build_note)
         note = QLabel(self.tr("build_capture_note"))
         note.setWordWrap(True)
@@ -1751,9 +2477,12 @@ class PropellerMainWindow(QMainWindow):
         builds_group = QGroupBox(self.tr("saved_builds_list"))
         builds_layout = QVBoxLayout(builds_group)
         self.build_table = self._table(["ID", self.tr("name"), self.tr("model"), "KV", "S",
-                                        self.tr("module_count"), self.tr("module_mass"), self.tr("update")])
+                                        self.tr("module_count"), self.tr("module_mass"), self.tr("update")],
+                                       "buildTable")
         self.build_table.itemSelectionChanged.connect(self._select_build)
         builds_layout.addWidget(self.build_table)
+        self.builds_empty_label = self._empty_label("empty_builds", "buildsEmpty")
+        builds_layout.addWidget(self.builds_empty_label)
         right_layout.addWidget(builds_group, 2)
         layout.addWidget(right_panel, 3)
         self._refresh_builds()
@@ -1782,6 +2511,7 @@ class PropellerMainWindow(QMainWindow):
         self.build_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         for column in (0, 3, 4, 5, 6, 7):
             self.build_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self._refresh_builds_empty()
 
     def _select_build(self) -> None:
         index = self.build_table.currentRow()
@@ -1804,42 +2534,65 @@ class PropellerMainWindow(QMainWindow):
         self._refresh_accessory_table()
         payload_display = from_si(float(row["payload_kg"] or 0), "mass_kg", self.unit_system)
         self.edits["build_payload"].setText(f"{payload_display:.10g}")
+        self._clear_dirty()
 
     def save_build_new(self) -> None:
         try:
             self._sync_build_text()
             self.current_build_id = self.repository.save_build(self._payload())
             self._refresh_builds()
+            self._clear_dirty()
         except Exception as exc:
-            QMessageBox.critical(self, APP_NAME, str(exc))
+            QMessageBox.critical(self, APP_NAME, f"{self.tr('calculation_error')}:\n{self.tr('details')}: {exc}")
 
     def update_build(self) -> None:
         if self.current_build_id is None:
             self.save_build_new()
             return
         self._sync_build_text()
-        self.repository.save_build(self._payload(), self.current_build_id)
+        try:
+            payload = self._payload()
+        except CalcInputErrors as exc:
+            self._show_calc_input_error(exc.field_errors)
+            return
+        except Exception as exc:
+            QMessageBox.critical(self, APP_NAME, f"{self.tr('calculation_error')}:\n{self.tr('details')}: {exc}")
+            return
+        # Payload parses: only now ask for the destructive overwrite.
+        if not self._confirm(self.tr("confirm_update")):
+            return
+        self.repository.save_build(payload, self.current_build_id)
         self._refresh_builds()
+        self._clear_dirty()
 
     def delete_build(self) -> None:
         if self.current_build_id is None:
             return
-        answer = QMessageBox.question(self, APP_NAME, self.tr("delete_confirm"))
-        if answer == QMessageBox.StandardButton.Yes:
+        if self._confirm(self.tr("delete_confirm")):
             self.repository.delete_build(self.current_build_id)
             self.current_build_id = None
             self._refresh_builds()
+            self._clear_dirty()
 
     def duplicate_build(self) -> None:
         if self.current_build_id is not None:
             self.current_build_id = self.repository.duplicate_build(self.current_build_id)
             self._refresh_builds()
+            self._clear_dirty()
 
     def export_build(self) -> None:
         self._sync_build_text()
         target, _ = QFileDialog.getSaveFileName(self, self.tr("export_json"), "build.json", "JSON (*.json)")
         if target:
-            Path(target).write_text(json.dumps(self._payload(), ensure_ascii=False, indent=2), encoding="utf-8")
+            try:
+                payload = self._payload()
+            except CalcInputErrors as exc:
+                self._show_calc_input_error(exc.field_errors)
+                return
+            except Exception as exc:
+                QMessageBox.critical(self, APP_NAME, f"{self.tr('calculation_error')}:\n{self.tr('details')}: {exc}")
+                return
+            Path(target).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def import_build(self) -> None:
         source, _ = QFileDialog.getOpenFileName(self, self.tr("import_json"), "", "JSON (*.json)")
@@ -1849,8 +2602,9 @@ class PropellerMainWindow(QMainWindow):
             payload = json.loads(Path(source).read_text(encoding="utf-8"))
             self.current_build_id = self.repository.save_build(payload)
             self._refresh_builds()
+            self._clear_dirty()
         except Exception as exc:
-            QMessageBox.critical(self, APP_NAME, str(exc))
+            QMessageBox.critical(self, APP_NAME, f"{self.tr('import_failed')}:\n{self.tr('details')}: {exc}")
 
     def _result_item(self, label: str, result: CalculationResult, inputs: CalculationInputs) -> dict[str, Any]:
         point = result.point
@@ -1919,13 +2673,22 @@ class PropellerMainWindow(QMainWindow):
         clear = QPushButton(self.tr("clear"))
         clear.clicked.connect(lambda: (self.compare_items.clear(), self._refresh_compare()))
         controls.addWidget(clear)
+        pdf = QPushButton(
+            "Експорт PDF-звіту" if self.language == "uk" else "Export PDF report")
+        pdf.setObjectName("exportComparePdf")
+        pdf.setAccessibleName("exportComparePdf")
+        pdf.clicked.connect(self.export_compare_pdf_report)
+        controls.addWidget(pdf)
         controls.addStretch(1)
         layout.addLayout(controls)
+        self.compare_empty_label = self._empty_label("empty_compare", "compareEmpty")
+        layout.addWidget(self.compare_empty_label)
         self.compare_table = self._table(["#", self.tr("name"), self.tr("thrust_card"), self.tr("current_card"),
                                           self.tr("power_card"), self.tr("torque"), "ηsystem", "ηmax", "ηaero", "T/W",
                                           self.tr("time"), self.tr("recommended_voltage"), self.tr("rpm_margin"),
                                           "ESC", self.tr("motor_name"), self.tr("battery_name"), self.tr("confidence"),
-                                          self.tr("source"), self.tr("warnings")])
+                                          self.tr("source"), self.tr("warnings")],
+                                         "compareTable")
         layout.addWidget(self.compare_table)
         self._refresh_compare()
         return tab
@@ -1942,7 +2705,7 @@ class PropellerMainWindow(QMainWindow):
             key = lambda item: min(item["esc_margin"], item["battery_margin"],
                                    item["rpm_margin"] if item["rpm_margin"] is not None else 100)
         else:
-            key = lambda item: item.get(key_map.get(criterion, "efficiency")) or -1e9
+            key = lambda item: self._compare_sort_value(item.get(key_map.get(criterion, "efficiency")))
         items = sorted(self.compare_items, key=key, reverse=reverse)
         self.compare_table.setRowCount(0)
         for i, item in enumerate(items):
@@ -1950,7 +2713,8 @@ class PropellerMainWindow(QMainWindow):
                       f"{item['current']:.2f}", f"{from_si(item['power'], 'power', self.unit_system):.3g}",
                       f"{from_si(item['torque'], 'torque', self.unit_system):.3g}",
                       f"{item['efficiency'] * 100:.1f}%", f"{item['max_efficiency'] * 100:.1f}%",
-                      f"{item['aero'] * 100:.1f}%", f"{item['tw']:.2f}", f"{item['runtime']:.1f}",
+                      f"{item['aero'] * 100:.1f}%", f"{item['tw']:.2f}",
+                      "n/a" if isinstance(item['runtime'], float) and math.isnan(item['runtime']) else f"{item['runtime']:.1f}",
                       "n/a" if item["recommended_voltage"] is None else f"{item['recommended_voltage']:.1f}",
                       self._margin(item["rpm_margin"]),
                       self._margin(item["esc_margin"]), self._margin(item["motor_margin"]),
@@ -1961,6 +2725,19 @@ class PropellerMainWindow(QMainWindow):
             for column in range(self.compare_table.columnCount()):
                 self.compare_table.item(i, column).setBackground(color)
         self.compare_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self._refresh_compare_empty()
+
+    @staticmethod
+    def _compare_sort_value(value: float | None) -> float:
+        """Normalize a compare ranking key: None and NaN sort as -1e9.
+
+        NaN is truthy, so the previous ``value or -1e9`` guard let a NaN
+        runtime through and a meaningless entry could rank #1 (e.g. under
+        "maximum time"). All other values keep the exact old semantics.
+        """
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return -1e9
+        return value or -1e9
 
     @staticmethod
     def _margin(value: float | None) -> str:
@@ -2010,16 +2787,17 @@ class PropellerMainWindow(QMainWindow):
         geometry = self._combo("frame_geometry", [("X", "X"), ("H", "H"), ("+", "+"),
                                                    (("Довільна" if self.language == "uk" else "Custom"), "custom")])
         form.addRow(self.tr("frame_geometry"), geometry)
-        self._field(form, self.tr("frame_motors"), "frame_motors")
-        self._field(form, self.tr("arm_width"), "arm_width", unit_label("length_m", self.unit_system))
-        self._field(form, self.tr("arm_thickness"), "arm_thickness", unit_label("length_m", self.unit_system))
+        self._field(form, self.tr("frame_motors"), "frame_motors", "", "motors")
+        self._field(form, self.tr("arm_width"), "arm_width", unit_label("length_m", self.unit_system), "arm_width")
+        self._field(form, self.tr("arm_thickness"), "arm_thickness", unit_label("length_m", self.unit_system),
+                    "arm_thickness")
         materials = [("Вуглепластик" if self.language == "uk" else "Carbon fiber", "Carbon fiber"),
                      ("Алюміній" if self.language == "uk" else "Aluminum", "Aluminum"),
                      ("Деревина" if self.language == "uk" else "Wood", "Wood"),
                      ("Власний" if self.language == "uk" else "Custom", "Custom")]
         form.addRow(self.tr("frame_material"), self._combo("frame_material", materials))
-        self._field(form, self.tr("frame_mass"), "frame_mass", unit_label("mass_kg", self.unit_system))
-        self._field(form, self.tr("payload"), "payload", unit_label("mass_kg", self.unit_system))
+        self._field(form, self.tr("frame_mass"), "frame_mass", unit_label("mass_kg", self.unit_system), "frame_mass")
+        self._field(form, self.tr("payload"), "payload", unit_label("mass_kg", self.unit_system), "build_payload")
         calculate = QPushButton(self.tr("recommend"), objectName="primary")
         calculate.clicked.connect(self.calculate_frame)
         form.addRow(calculate)
@@ -2108,7 +2886,8 @@ class PropellerMainWindow(QMainWindow):
         info = QLabel(self.tr("open_calculation_info"))
         info.setWordWrap(True)
         layout.addWidget(info)
-        self.trace_table = self._table([self.tr("variable"), self.tr("formula"), self.tr("value"), self.tr("unit")])
+        self.trace_table = self._table([self.tr("variable"), self.tr("formula"), self.tr("value"), self.tr("unit")],
+                                      "traceTable")
         layout.addWidget(self.trace_table, 1)
         button = QPushButton(self.tr("recalculate"), objectName="primary")
         button.clicked.connect(self.calculate)
@@ -2250,6 +3029,9 @@ class PropellerMainWindow(QMainWindow):
         details.setWordWrap(True)
         details.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(details)
+        copyright_notice = QLabel("© 2026 Ivan Soprun · All rights reserved")
+        copyright_notice.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(copyright_notice)
         layout.addStretch(1)
         return tab
 

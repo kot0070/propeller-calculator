@@ -12,24 +12,37 @@
 
 This project demonstrates desktop application development, large local dataset handling, engineering-oriented calculation workflows, packaging, testing, and reproducible release artifacts.
 
-Автор: **Ivan Soprun**. Офлайн Windows-застосунок для розрахунку й порівняння пропелерів, з українським та англійським інтерфейсом.
+[Українською](README_UA.md)
 
-Репозиторій містить оригінальний код, тести, скрипти обробки даних, матеріали збірки, інструкцію та звіти. Готовий EXE, вбудована база та вихідні набори даних збережені у [приватному релізі v3.3.0](https://github.com/kot0070/propeller-calculator/releases/tag/v3.3.0).
+Author: **Ivan Soprun**. Offline Windows application for calculating and comparing propellers, with Ukrainian and English interfaces.
 
-## Готова програма
+The repository contains the original code, tests, data-processing scripts, build materials, the user guide, and reports. The ready EXE, embedded database, and source datasets are stored in the [private release v3.3.0](https://github.com/kot0070/propeller-calculator/releases/tag/v3.3.0).
 
-Завантажте `Propeller_Calculator_Professional_UA_v3_3.exe` з релізу. Python та інсталяція не потрібні. Інструкція: [README_UA.md](outputs/README_UA.md); повний PDF — у `outputs/`.
+## MVP status — 3.3.0
 
-## Запуск із коду
+Status: **MVP RELEASE CANDIDATE**. All 14 release gates PASS.
+Test suites: 78 unittest methods + 14-block UI functional, all green.
+Workbook: 127 tests — 60 PASS / 62 N/A (out-of-scope platforms with evidence) / 5 NOT STARTED (all non-gate).
+Production DB: 1053 models / 335434 points.
+EXE: `Propeller_Calculator_Professional_UA_v3_3.exe`.
+Agent report: `work/AGENT_PERFORMANCE_REPORT.md` (strengths, weaknesses, recommendations).
+Known residuals: CI green on windows-latest since 2026-09-26 (run 36214336529+); T043 empty-state CTAs and T044 busy indicators shipped (both PASS); remaining open: screen-reader live-hearing leg (T045 residual), env-bound taste rows T046/P008/P010 (NOT STARTED), manual UAT users.
+Database tab: one-click restore (`restoreDatabase` → `restore_database`/`restore_database_from_path`) with fail-closed read-only validation (`validate_restore_candidate`: `PRAGMA quick_check`, required tables, model-count check), timestamped safety backup, and atomic replace. Calculator (simple + engineering) and comparison tabs: in-app PDF reports (`exportCalcPdf` → `export_calc_pdf_report`, `exportComparePdf` → `export_compare_pdf_report`) via Qt `QTextDocument`/`QPdfWriter`, covering inputs, results, source-vs-math, warnings, and app version.
 
-Потрібен Python 3.11+ для Windows. Команди PowerShell із кореня репозиторію:
+## Ready application
+
+Download `Propeller_Calculator_Professional_UA_v3_3.exe` from the release. Python and installation are not required. User guide: [outputs/README_UA.md](outputs/README_UA.md); the full PDF is in `outputs/`.
+
+## Run from source
+
+Requires Python 3.11+ on Windows. PowerShell commands from the repository root:
 
 ```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Завантажте `propellers-database-v3.3.0.zip` з релізу в корінь проєкту й розпакуйте:
+Download `propellers-database-v3.3.0.zip` from the release into the project root and extract it:
 
 ```powershell
 New-Item -ItemType Directory -Path work\build -Force
@@ -37,37 +50,37 @@ Expand-Archive -LiteralPath .\propellers-database-v3.3.0.zip -DestinationPath .\
 .\.venv\Scripts\python.exe .\src\main.py
 ```
 
-Для завантаження через авторизований GitHub CLI можна використати:
+To download with an authenticated GitHub CLI:
 
 ```powershell
 gh release download v3.3.0 --repo kot0070/propeller-calculator --pattern propellers-database-v3.3.0.zip
 ```
 
-База `work/build/propellers.db` містить 1 053 моделі та 335 434 характеристики. Застосунок створює окрему робочу копію у `%LOCALAPPDATA%\IvanSoprun\PropellerCalculatorProfessionalUA`.
+The database `work/build/propellers.db` contains 1,053 models and 335,434 characteristics. The application creates a separate working copy in `%LOCALAPPDATA%\IvanSoprun\PropellerCalculatorProfessionalUA`.
 
-## Тести
+## Tests
 
-Після відновлення бази:
+After restoring the database:
 
 ```powershell
 $env:PYTHONPATH = "$PWD\src"
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-## Збірка EXE
+## Build the EXE
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install "PyInstaller>=6,<7"
 .\.venv\Scripts\python.exe -m PyInstaller --noconfirm PropellerCalculator.spec
 ```
 
-Результат: `dist/Propeller_Calculator_Professional_UA_v3_3.exe`. Кореневий spec використовує відносні шляхи; попередній оригінальний spec залишено у `work/pyinstaller/`.
+Result: `dist/Propeller_Calculator_Professional_UA_v3_3.exe`. The root spec uses relative paths; the previous original spec is kept in `work/pyinstaller/`.
 
-## Дані та контроль цілісності
+## Data and integrity checks
 
-- `propellers-database-v3.3.0.zip` — повна початкова база, потрібна для запуску з коду й тестів.
-- `propeller-source-data-v3.3.0.zip` — усі збережені вихідні файли; розпаковуються у `work/extracted/` для дослідження або відтворення імпорту.
-- `SHA256SUMS.txt` у релізі — контрольні суми завантажуваних файлів.
-- `outputs/` — оригінальні аудит, інструкція, скриншот та звіти попередньої розробки. Їхні результати описують перевірки на момент створення версії.
+- `propellers-database-v3.3.0.zip` — full initial database, required to run from source and to run tests.
+- `propeller-source-data-v3.3.0.zip` — all preserved source files; extract into `work/extracted/` for research or to reproduce the import.
+- `SHA256SUMS.txt` in the release — checksums of the downloadable files.
+- `outputs/` — original audit, user guide, screenshot, and reports from the earlier development. Their results describe the checks at the time the version was created.
 
-Скрипти у `work/scripts/` та інвентарі у `work/source_audit/` збережено з оригіналу; деякі допоміжні скрипти містять шляхи й залежності початкового середовища розробки. Вони не потрібні для звичайного запуску.
+Scripts in `work/scripts/` and inventories in `work/source_audit/` are kept from the original; some helper scripts contain paths and dependencies from the original development environment. They are not required for a normal run.

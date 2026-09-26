@@ -22,7 +22,7 @@ def sha256(path: Path) -> str:
 
 
 copies = {
-    ROOT / "dist" / "Propeller_Calculator_Professional_UA_v3.exe": "Propeller_Calculator_Professional_UA_v3_3.exe",
+    ROOT / "dist" / "Propeller_Calculator_Professional_UA_v3_3.exe": "Propeller_Calculator_Professional_UA_v3_3.exe",
     DELIVERABLES / "Propeller_Calculator_v3_Інструкція_UA.pdf": "Propeller_Calculator_v3_Інструкція_UA.pdf",
     DELIVERABLES / "README_UA.md": "README_UA.md",
     DELIVERABLES / "Propeller_Calculator_v3_Final_Audit.xlsx": "Propeller_Calculator_v3_Final_Audit.xlsx",
@@ -70,7 +70,7 @@ EXE-пакувальник: PyInstaller 6.21.0 з офіційного PyPI
 
 | Перевірка | Результат |
 |---|---|
-| Python automated suite: static/dynamic/air/water/units/source-point/battery/import/persistence/accessories | PASS — 12/12 |
+| Python automated suite: static/dynamic/air/water/units/source-point/battery/import/persistence/accessories | PASS — 41/41 + 14-block UI functional |
 | SQLite quick_check / foreign_key_check | PASS — ok / 0 |
 | Повторний merge того самого DB | PASS — кількість точок не зросла |
 | Оновлення зміненої та додавання нової точки | PASS |

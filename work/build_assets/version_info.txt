@@ -18,7 +18,7 @@ VSVersionInfo(
          StringStruct(u'FileVersion', u'3.3.0'),
          StringStruct(u'InternalName', u'PropellerCalculatorProfessionalUAv3'),
          StringStruct(u'LegalCopyright', u'Copyright (c) 2026 Ivan Soprun'),
-         StringStruct(u'OriginalFilename', u'Propeller_Calculator_Professional_UA_v3.exe'),
+         StringStruct(u'OriginalFilename', u'Propeller_Calculator_Professional_UA_v3_3.exe'),
          StringStruct(u'ProductName', u'Propeller Calculator Professional UA v3'),
          StringStruct(u'ProductVersion', u'3.3.0'),
          StringStruct(u'Comments', u'Author: Ivan Soprun; Offline professional propeller engineering calculator')])

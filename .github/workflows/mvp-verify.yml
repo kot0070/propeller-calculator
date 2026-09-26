@@ -1,0 +1,57 @@
+name: mvp-verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  mvp-verify:
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Download production database
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download v3.3.0 --repo ${{ github.repository }} --pattern propellers-database-v3.3.0.zip
+          New-Item -ItemType Directory -Path work/build -Force
+          Expand-Archive -LiteralPath .\propellers-database-v3.3.0.zip -DestinationPath .\work\build
+
+      - name: Security audit (fail on HIGH/CRITICAL only)
+        run: |
+          python -m pip install pip-audit
+          python -m pip_audit -r requirements.txt -f json -o audit.json
+          python -c "import json, sys; doc = json.load(open('audit.json')); vulns = doc.get('vulnerabilities', []) if isinstance(doc, dict) else [v for d in doc for v in d.get('vulns', [])]; blocking = []; unknown = []; [blocking.append(v.get('id', str(v))) if ('CRITICAL' in ' '.join(str(val) for k, val in v.items() if 'sever' in k.lower() or 'cvss' in k.lower() or k.lower() in ('score', 'rating', 'level')).upper() or 'HIGH' in ' '.join(str(val) for k, val in v.items() if 'sever' in k.lower() or 'cvss' in k.lower() or k.lower() in ('score', 'rating', 'level')).upper()) else unknown.append(v.get('id', str(v))) for v in vulns]; print('BLOCKING HIGH/CRITICAL:', blocking) if blocking else None; sys.exit(1) if blocking else (print('No severity metadata; failing conservatively on:', unknown) or sys.exit(1)) if unknown else print('No HIGH/CRITICAL vulnerabilities.')"
+
+      - name: Unit tests
+        run: |
+          $env:PYTHONPATH = "$PWD\src"
+          python -m unittest discover -s tests -v
+
+      - name: UI functional test (offscreen)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $env:PYTHONPATH = "$PWD\src"
+          python work/scripts/ui_functional_test.py
+
+      - name: Build EXE (mechanics gate)
+        run: |
+          python -m pip install "PyInstaller>=6,<7"
+          python -m PyInstaller --noconfirm PropellerCalculator.spec
