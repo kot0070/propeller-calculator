@@ -516,6 +516,7 @@ class PropellerMainWindow(QMainWindow):
         self._apply_tooltips()
         self._apply_responsive(self.width())
         self._update_preset_status()
+        self._refresh_empty_states()
         if self.current_result and self.current_inputs:
             self._display_result(self.current_result, self.current_inputs)
             self._refresh_trace()
@@ -752,6 +753,7 @@ class PropellerMainWindow(QMainWindow):
     def _sync_model(self, source: QComboBox) -> None:
         model_id = str(source.currentData() or source.currentText().strip())
         self.selected_model_id = model_id
+        self._refresh_calc_empty()
         for widget in self.model_combos:
             if widget is source:
                 continue
@@ -977,6 +979,8 @@ class PropellerMainWindow(QMainWindow):
         self.calc_error_label.setAccessibleName("calcInputError")
         layout.addWidget(self.calc_error_label)
         self._calc_error_originals = {}
+        self.calc_empty_label = self._empty_label("empty_calculator", "calcEmpty")
+        layout.addWidget(self.calc_empty_label)
         self.calculator_modes = QTabWidget()
         self.calculator_modes.setObjectName("calculatorModes")
         self.calculator_modes.addTab(self._simple_calculator_page(), self.tr("simple_mode"))
@@ -986,6 +990,7 @@ class PropellerMainWindow(QMainWindow):
         self.calculator_modes.currentChanged.connect(
             lambda index: self._save_setting("calculator_mode", str(index)))
         layout.addWidget(self.calculator_modes)
+        self._refresh_calc_empty()
         return tab
 
     def _mode_intro(self, text: str) -> QLabel:
@@ -993,6 +998,58 @@ class PropellerMainWindow(QMainWindow):
         label.setWordWrap(True)
         label.setObjectName("modeIntro")
         return label
+
+    def _empty_label(self, key: str, accessible: str) -> QLabel:
+        label = QLabel(self.tr(key))
+        label.setWordWrap(True)
+        label.setObjectName("modeIntro")
+        label.setAccessibleName(accessible)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        return label
+
+    def _refresh_calc_empty(self) -> None:
+        label = getattr(self, "calc_empty_label", None)
+        if label is None:
+            return
+        try:
+            combo_empty = self.model_combo.count() == 0 if hasattr(self, "model_combo") else False
+        except RuntimeError:
+            combo_empty = True
+        has_model = bool((self.selected_model_id or "").strip()) and not combo_empty
+        label.setVisible(not has_model)
+
+    def _refresh_db_empty(self) -> None:
+        label = getattr(self, "db_empty_label", None)
+        if label is None or not hasattr(self, "model_table"):
+            return
+        try:
+            label.setVisible(self.model_table.rowCount() == 0)
+        except RuntimeError:
+            pass
+
+    def _refresh_builds_empty(self) -> None:
+        label = getattr(self, "builds_empty_label", None)
+        if label is None or not hasattr(self, "build_table"):
+            return
+        try:
+            label.setVisible(self.build_table.rowCount() == 0)
+        except RuntimeError:
+            pass
+
+    def _refresh_compare_empty(self) -> None:
+        label = getattr(self, "compare_empty_label", None)
+        if label is None:
+            return
+        try:
+            label.setVisible(len(self.compare_items) == 0)
+        except RuntimeError:
+            pass
+
+    def _refresh_empty_states(self) -> None:
+        self._refresh_calc_empty()
+        self._refresh_db_empty()
+        self._refresh_builds_empty()
+        self._refresh_compare_empty()
 
     def _medium_combo(self) -> QComboBox:
         labels = [("Повітря" if self.language == "uk" else "Air", "air"),
@@ -1711,6 +1768,8 @@ class PropellerMainWindow(QMainWindow):
         res.clicked.connect(self.restore_database)
         controls.addWidget(res)
         layout.addLayout(controls)
+        self.db_empty_label = self._empty_label("empty_database", "dbEmpty")
+        layout.addWidget(self.db_empty_label)
         splitter = QSplitter(Qt.Orientation.Vertical)
         self.model_table = self._table(["Model_ID", self.tr("original"), self.tr("manufacturer"), self.tr("size"),
                                         self.tr("evidence"), self.tr("points"), self.tr("geometry")],
@@ -1754,6 +1813,7 @@ class PropellerMainWindow(QMainWindow):
             self.model_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         if self.model_table.rowCount():
             self.model_table.setCurrentCell(0, 0)
+        self._refresh_db_empty()
 
     def _model_selected(self) -> None:
         row_index = self.model_table.currentRow()
@@ -2421,6 +2481,8 @@ class PropellerMainWindow(QMainWindow):
                                        "buildTable")
         self.build_table.itemSelectionChanged.connect(self._select_build)
         builds_layout.addWidget(self.build_table)
+        self.builds_empty_label = self._empty_label("empty_builds", "buildsEmpty")
+        builds_layout.addWidget(self.builds_empty_label)
         right_layout.addWidget(builds_group, 2)
         layout.addWidget(right_panel, 3)
         self._refresh_builds()
@@ -2449,6 +2511,7 @@ class PropellerMainWindow(QMainWindow):
         self.build_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         for column in (0, 3, 4, 5, 6, 7):
             self.build_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self._refresh_builds_empty()
 
     def _select_build(self) -> None:
         index = self.build_table.currentRow()
@@ -2618,6 +2681,8 @@ class PropellerMainWindow(QMainWindow):
         controls.addWidget(pdf)
         controls.addStretch(1)
         layout.addLayout(controls)
+        self.compare_empty_label = self._empty_label("empty_compare", "compareEmpty")
+        layout.addWidget(self.compare_empty_label)
         self.compare_table = self._table(["#", self.tr("name"), self.tr("thrust_card"), self.tr("current_card"),
                                           self.tr("power_card"), self.tr("torque"), "ηsystem", "ηmax", "ηaero", "T/W",
                                           self.tr("time"), self.tr("recommended_voltage"), self.tr("rpm_margin"),
@@ -2660,6 +2725,7 @@ class PropellerMainWindow(QMainWindow):
             for column in range(self.compare_table.columnCount()):
                 self.compare_table.item(i, column).setBackground(color)
         self.compare_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self._refresh_compare_empty()
 
     @staticmethod
     def _compare_sort_value(value: float | None) -> float:

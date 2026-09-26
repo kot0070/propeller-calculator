@@ -9,8 +9,8 @@ The repository contains the original code, tests, data-processing scripts, build
 ## MVP status — 3.3.0
 
 Status: **MVP RELEASE CANDIDATE**. All 14 release gates PASS.
-Test suites: 41 unit + 14-block UI functional, all green.
-Workbook: 127 tests — 58 PASS / 62 N/A (out-of-scope platforms with evidence) / 7 NOT STARTED (all non-gate).
+Test suites: 78 unit + 14-block UI functional, all green.
+Workbook: 127 tests — 60 PASS / 62 N/A (out-of-scope platforms with evidence) / 5 NOT STARTED (all non-gate).
 Production DB: 1053 models / 335434 points.
 EXE: `Propeller_Calculator_Professional_UA_v3_3.exe`.
 Agent report: \work/AGENT_PERFORMANCE_REPORT.md\ (strengths, weaknesses, recommendations).

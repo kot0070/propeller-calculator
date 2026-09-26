@@ -923,3 +923,162 @@ class QtBusyConfirmTests(unittest.TestCase):
             finally:
                 window.close()
                 app.processEvents()
+
+
+@requires_qt
+@requires_tiny_db
+class QtEmptyStateTests(unittest.TestCase):
+    """Per-tab empty-state CTA labels (T043): visible when empty, hidden otherwise.
+
+    Uses tempfile copies of work/build/propellers.seed.db (schema-only, no
+    models), never the production database. Offscreen.
+    """
+
+    def _make_window(self, app, tmp: str):
+        from propcalc.qt_app import PropellerMainWindow
+
+        db_copy = Path(tmp) / "propellers.seed.db"
+        shutil.copy2(TINY_SEED_DB, db_copy)
+        window = PropellerMainWindow(database_path=str(db_copy))
+        window.show()
+        app.processEvents()
+        app.processEvents()
+        return window
+
+    @staticmethod
+    def _compare_item(label: str = "demo") -> dict:
+        return {"label": label, "thrust": 10.0, "current": 5.0, "power": 70.0,
+                "torque": 0.05, "efficiency": 0.5, "aero": 0.6,
+                "max_efficiency": 0.55, "recommended_voltage": 14.8,
+                "tw": 1.2, "runtime": 12.5, "voltage": 14.8,
+                "rpm_margin": 10.0, "esc_margin": 20.0, "motor_margin": 15.0,
+                "battery_margin": 25.0, "confidence": 0.9,
+                "source": "test", "warnings": "", "mass": 1.5}
+
+    def test_empty_states_visible_on_empty_db(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                app.processEvents()
+                for attr, key in (
+                    ("calc_empty_label", "empty_calculator"),
+                    ("db_empty_label", "empty_database"),
+                    ("builds_empty_label", "empty_builds"),
+                    ("compare_empty_label", "empty_compare"),
+                ):
+                    with self.subTest(tab=attr):
+                        label = getattr(window, attr)
+                        self.assertEqual(label.text(), window.tr(key))
+                        self.assertTrue(label.text().strip(), f"{key} text empty")
+                        self.assertFalse(label.isHidden(), f"{attr} must be visible when empty")
+                        self.assertEqual(label.objectName(), "modeIntro")
+                self.assertEqual(window.model_table.rowCount(), 0)
+                self.assertEqual(window.build_table.rowCount(), 0)
+                self.assertEqual(len(window.compare_items), 0)
+            finally:
+                window.close()
+                app.processEvents()
+
+    def test_nonempty_states_hide_labels(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from unittest import mock
+
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        import propcalc.qt_app as qt_app
+
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                app.processEvents()
+                import sqlite3
+
+                seed = sqlite3.connect(window.database_path)
+                try:
+                    seed.execute(
+                        "INSERT OR IGNORE INTO models(model_id,original_name,diameter_m)"
+                        " VALUES(?,?,?)",
+                        ("TEST:10X5", "Test 10x5", 0.254))
+                    seed.commit()
+                finally:
+                    seed.close()
+                window.repository.clear_caches()
+                # Database non-empty: refresh models -> label hides.
+                window._refresh_models()
+                app.processEvents()
+                self.assertGreater(window.model_table.rowCount(), 0)
+                self.assertTrue(window.db_empty_label.isHidden())
+                # Calculator non-empty: rebuild picks up the new model.
+                window._build_ui()
+                window.show()
+                app.processEvents()
+                app.processEvents()
+                self.assertTrue(window.selected_model_id.strip())
+                self.assertGreater(window.model_combo.count(), 0)
+                self.assertTrue(window.calc_empty_label.isHidden())
+                # Builds non-empty: save one build via the real slot.
+                window.selected_model_id = "TEST:10X5"
+                with (
+                    mock.patch.object(qt_app.QMessageBox, "critical") as critical,
+                    mock.patch.object(qt_app.QMessageBox, "information"),
+                ):
+                    window.save_build_new()
+                    app.processEvents()
+                self.assertFalse(critical.called)
+                self.assertGreater(window.build_table.rowCount(), 0)
+                self.assertTrue(window.builds_empty_label.isHidden())
+                # Compare non-empty: add one item -> label hides.
+                window.compare_items = [self._compare_item("demo")]
+                window._refresh_compare()
+                app.processEvents()
+                self.assertGreater(window.compare_table.rowCount(), 0)
+                self.assertTrue(window.compare_empty_label.isHidden())
+                # Clearing compare restores the empty CTA (collapse check).
+                window.compare_items.clear()
+                window._refresh_compare()
+                app.processEvents()
+                self.assertFalse(window.compare_empty_label.isHidden())
+            finally:
+                window.close()
+                app.processEvents()
+
+    def test_empty_labels_bilingual(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as tmp:
+            window = self._make_window(app, tmp)
+            try:
+                app.processEvents()
+                start = window.language
+                texts: dict[str, dict[str, str]] = {}
+                for language in ("uk", "en"):
+                    window._switch_language(language)
+                    app.processEvents()
+                    texts[language] = {
+                        "calc": window.calc_empty_label.text(),
+                        "db": window.db_empty_label.text(),
+                        "builds": window.builds_empty_label.text(),
+                        "compare": window.compare_empty_label.text(),
+                    }
+                    for value in texts[language].values():
+                        self.assertTrue(value.strip())
+                    # Empty DB -> all CTAs stay visible after each rebuild.
+                    self.assertFalse(window.calc_empty_label.isHidden())
+                    self.assertFalse(window.db_empty_label.isHidden())
+                    self.assertFalse(window.builds_empty_label.isHidden())
+                    self.assertFalse(window.compare_empty_label.isHidden())
+                self.assertNotEqual(texts["uk"]["calc"], texts["en"]["calc"])
+                self.assertNotEqual(texts["uk"]["db"], texts["en"]["db"])
+                if start not in ("uk", "en") or window.language != start:
+                    window._switch_language(start)
+                    app.processEvents()
+            finally:
+                window.close()
+                app.processEvents()

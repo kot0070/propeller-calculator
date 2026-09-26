@@ -9,8 +9,8 @@
 ## MVP-статус — 3.3.0
 
 Статус: **MVP RELEASE CANDIDATE**. Усі 14 релізних гейтів PASS.
-Тестові набори: 41 unit + 14-блоковий UI functional, усі зелені.
-Workbook: 127 тестів — 58 PASS / 62 N/A (платформи поза скоупом, з доказами) / 7 NOT STARTED (усі не-гейтові).
+Тестові набори: 78 unit + 14-блоковий UI functional, усі зелені.
+Workbook: 127 тестів — 60 PASS / 62 N/A (платформи поза скоупом, з доказами) / 5 NOT STARTED (усі не-гейтові).
 Продукційна БД: 1053 моделі / 335434 точки.
 EXE: `Propeller_Calculator_Professional_UA_v3_3.exe`.
 Звіт по агентах: \work/AGENT_PERFORMANCE_REPORT.md\ (сильні/слабкі сторони, рекомендації).

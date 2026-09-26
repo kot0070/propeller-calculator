@@ -231,6 +231,10 @@ UI_TEXT: dict[str, dict[str, str]] = {
         "example_1": "Приклад 1 — дані бази",
         "example_2": "Приклад 2 — власна збірка",
         "load_example": "ЗАВАНТАЖИТИ ПРИКЛАД У КАЛЬКУЛЯТОР",
+        "empty_calculator": "Модель не вибрано — виберіть модель, щоб почати. Для перевірки даних бази використовуйте режим «Відтворити випробування з бази», для власного апарата — «Власні параметри».",
+        "empty_database": "Записів немає — натисніть «Імпортувати» або «Відновити базу даних».",
+        "empty_builds": "Збірок немає — виконайте розрахунок і натисніть «Зберегти збірку».",
+        "empty_compare": "Порівняння порожнє — натисніть «Додати до порівняння».",
     },
     "en": {
         "calculator": "Calculator",
@@ -461,6 +465,10 @@ UI_TEXT: dict[str, dict[str, str]] = {
         "example_1": "Example 1 — database data",
         "example_2": "Example 2 — custom build",
         "load_example": "LOAD EXAMPLE INTO CALCULATOR",
+        "empty_calculator": "No model selected — select a model to begin. Use “Reproduce a database test” to verify database data, or “Custom inputs” for your own aircraft.",
+        "empty_database": "No records — use Import or Restore database.",
+        "empty_builds": "No builds — calculate, then Save build.",
+        "empty_compare": "Comparison is empty — Add current calculation.",
     },
 }
 
