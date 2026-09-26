@@ -9,17 +9,17 @@
 ## MVP-статус — 3.3.0
 
 Статус: **MVP RELEASE CANDIDATE**. Усі 14 релізних гейтів PASS.
-Тестові набори: 78 unit + 14-блоковий UI functional, усі зелені.
+Тестові набори: 78 unittest methods + 14-блоковий UI functional, усі зелені.
 Workbook: 127 тестів — 60 PASS / 62 N/A (платформи поза скоупом, з доказами) / 5 NOT STARTED (усі не-гейтові).
 Продукційна БД: 1053 моделі / 335434 точки.
 EXE: `Propeller_Calculator_Professional_UA_v3_3.exe`.
-Звіт по агентах: \work/AGENT_PERFORMANCE_REPORT.md\ (сильні/слабкі сторони, рекомендації).
+Звіт по агентах: `work/AGENT_PERFORMANCE_REPORT.md` (сильні/слабкі сторони, рекомендації).
 Відомі залишки: CI workflow очікує token scope; занотовано живе прослуховування скрінрідера + переклади другого двійника; відкриті ручні смакові рядки (T043 CTA тощо).
 Вкладка «База даних»: відновлення в один клік (`restoreDatabase` → `restore_database`/`restore_database_from_path`) із закритою за замовчуванням перевіркою лише для читання (`validate_restore_candidate`: `PRAGMA quick_check`, обов'язкові таблиці, перевірка кількості моделей), резервною копією з міткою часу й атомарною заміною. Вкладки калькулятора (простий + інженерний) і порівняння: вбудовані PDF-звіти (`exportCalcPdf` → `export_calc_pdf_report`, `exportComparePdf` → `export_compare_pdf_report`) через Qt `QTextDocument`/`QPdfWriter` — вхідні дані, результати, джерело проти математики, попередження, версія програми.
 
 ## Готова програма
 
-Завантажте `Propeller_Calculator_Professional_UA_v3_3.exe` з релізу. Python та інсталяція не потрібні. Інструкція: [README_UA.md](outputs/README_UA.md); повний PDF — у `outputs/`.
+Завантажте `Propeller_Calculator_Professional_UA_v3_3.exe` з релізу. Python та інсталяція не потрібні. Інструкція: [інструкція користувача](outputs/README_UA.md); повний PDF — у `outputs/`.
 
 ## Запуск із коду
 

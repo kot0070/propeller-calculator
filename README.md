@@ -9,11 +9,11 @@ The repository contains the original code, tests, data-processing scripts, build
 ## MVP status — 3.3.0
 
 Status: **MVP RELEASE CANDIDATE**. All 14 release gates PASS.
-Test suites: 78 unit + 14-block UI functional, all green.
+Test suites: 78 unittest methods + 14-block UI functional, all green.
 Workbook: 127 tests — 60 PASS / 62 N/A (out-of-scope platforms with evidence) / 5 NOT STARTED (all non-gate).
 Production DB: 1053 models / 335434 points.
 EXE: `Propeller_Calculator_Professional_UA_v3_3.exe`.
-Agent report: \work/AGENT_PERFORMANCE_REPORT.md\ (strengths, weaknesses, recommendations).
+Agent report: `work/AGENT_PERFORMANCE_REPORT.md` (strengths, weaknesses, recommendations).
 Known residuals: CI workflow pending token scope; screen-reader live hearing + second-twin translations noted; manual taste rows (T043 CTA etc.) open.
 Database tab: one-click restore (`restoreDatabase` → `restore_database`/`restore_database_from_path`) with fail-closed read-only validation (`validate_restore_candidate`: `PRAGMA quick_check`, required tables, model-count check), timestamped safety backup, and atomic replace. Calculator (simple + engineering) and comparison tabs: in-app PDF reports (`exportCalcPdf` → `export_calc_pdf_report`, `exportComparePdf` → `export_compare_pdf_report`) via Qt `QTextDocument`/`QPdfWriter`, covering inputs, results, source-vs-math, warnings, and app version.
 
