@@ -10,6 +10,13 @@ from pathlib import Path
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
+try:
+    # CI Windows consoles default to cp1252; force UTF-8 so the final
+    # report (Ukrainian strings) never raises UnicodeEncodeError.
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+except Exception:
+    pass
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
@@ -230,7 +237,12 @@ def main() -> None:
                                 report["accessory_inventory"]["passed"],
                                 report["saved_build"]["passed"]))
         (reports / "ui_functional_test.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        payload = json.dumps(report, ensure_ascii=False, indent=2)
+        try:
+            print(payload)
+        except UnicodeEncodeError:
+            # Fallback for non-UTF-8 consoles that ignore reconfigure/env.
+            print(json.dumps(report, ensure_ascii=True, indent=2))
 
 
 if __name__ == "__main__":
