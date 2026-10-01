@@ -25,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Download production database and prepare CI seed
+      - name: Download production database and prepare schema-only CI seed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -33,11 +33,14 @@ jobs:
           New-Item -ItemType Directory -Path work/build -Force
           Expand-Archive -LiteralPath .\propellers-database-v3.3.0.zip -DestinationPath .\work\build
           if (-not (Test-Path .\work\build\propellers.db)) { throw "Production database missing after release extraction" }
-          # Qt/PDF/restore tests deliberately operate on temporary copies of
-          # propellers.seed.db. CI previously never created that file, so 34 tests
-          # were silently skipped even though the full production DB was available.
-          Copy-Item .\work\build\propellers.db .\work\build\propellers.seed.db -Force
-          Write-Host "CI seed prepared from the verified release database."
+          # Two fixtures have intentionally different roles:
+          # - propellers.db is the verified production database used by DB/calculator tests.
+          # - propellers.seed.db must be schema-only so empty-state and restore tests can
+          #   safely make temporary copies and explicitly test zero-model behaviour.
+          Remove-Item .\work\build\propellers.seed.db -Force -ErrorAction SilentlyContinue
+          $env:PYTHONPATH = "$PWD\src"
+          python -c "import sqlite3; from propcalc.database import initialize_database; p=r'work/build/propellers.seed.db'; c=sqlite3.connect(p); initialize_database(c); c.commit(); c.close()"
+          python -c "import sqlite3; p=r'work/build/propellers.seed.db'; c=sqlite3.connect(p); n=c.execute('SELECT COUNT(*) FROM models').fetchone()[0]; q=c.execute('PRAGMA quick_check').fetchone()[0]; c.close(); assert n == 0, n; assert q == 'ok', q; print('Schema-only CI seed verified: models=0 quick_check=ok')"
 
       - name: Security audit (fail on HIGH/CRITICAL only)
         run: |
