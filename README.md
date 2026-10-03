@@ -1,5 +1,17 @@
 # Propeller Calculator Professional UA — 3.3.0
 
+## Portfolio snapshot
+
+**Windows desktop engineering application for calculating, comparing, and exploring propeller data.**
+
+- **Stack:** Python 3.11+ · PySide6 · local database · unittest · PyInstaller
+- **Dataset scale:** **1,053 propeller models** and **335,434 characteristics**
+- **UI:** Ukrainian / English
+- **Delivery:** source code, tests, data-processing scripts, reproducible build instructions, and standalone Windows EXE
+- **Offline-first:** no Python installation is required for the packaged application
+
+This project demonstrates desktop application development, large local dataset handling, engineering-oriented calculation workflows, packaging, testing, and reproducible release artifacts.
+
 [Українською](README_UA.md)
 
 Author: **Ivan Soprun**. Offline Windows application for calculating and comparing propellers, with Ukrainian and English interfaces.
